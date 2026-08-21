@@ -1,0 +1,99 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  name         String
+  avatar       String?
+  role         String      @default("MEMBER") // ADMIN, MANAGER, MEMBER
+  title        String?     // e.g. "资深前端工程师", "产品经理"
+  teamId       String?
+  team         Team?       @relation(fields: [teamId], references: [id])
+  logs         WorkLog[]
+  comments     Comment[]
+  reactions    Reaction[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Team {
+  id          String      @id @default(uuid())
+  name        String      // e.g. "技术研发部", "广告增长组"
+  slug        String      @unique
+  color       String?     @default("#3b82f6")
+  members     User[]
+  createdAt   DateTime    @default(now())
+}
+
+model WorkLog {
+  id          String      @id @default(uuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date        String      // YYYY-MM-DD
+  title       String?
+  hasBlocker  Boolean     @default(false) // 快速索引是否有阻塞点
+  mood        String?     // 表情/心情: "🚀", "⚡", "😴", "🔥", "🧘"
+  
+  // 核心内容存储：遵循 Normalized Block 规范
+  contentJson String      // JSON 字符串 (Tiptap / Block 状态树)
+  contentText String      // 纯文本索引，用于秒级全文搜索
+  
+  // 标签关联
+  tags        TagOnLog[]
+  
+  // 协作互动
+  comments    Comment[]
+  reactions   Reaction[]
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([userId, date]) // 每个成员每天一份权威日志
+}
+
+model Tag {
+  id          String      @id @default(uuid())
+  name        String      @unique // e.g. "TikTok-Ad", "Auth-Refactor"
+  color       String?     @default("#10b981")
+  logs        TagOnLog[]
+  createdAt   DateTime    @default(now())
+}
+
+model TagOnLog {
+  logId       String
+  tagId       String
+  log         WorkLog     @relation(fields: [logId], references: [id], onDelete: Cascade)
+  tag         Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([logId, tagId])
+}
+
+model Comment {
+  id          String      @id @default(uuid())
+  logId       String
+  log         WorkLog     @relation(fields: [logId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  content     String
+  blockId     String?     // 可选绑定到具体 Block ID
+  createdAt   DateTime    @default(now())
+}
+
+model Reaction {
+  id          String      @id @default(uuid())
+  logId       String
+  log         WorkLog     @relation(fields: [logId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation(fields: [userId], references: [id])
+  emoji       String      // 👍, 👀, 🚀, 🎯, ❤️
+  createdAt   DateTime    @default(now())
+
+  @@unique([logId, userId, emoji])
+}

@@ -1,0 +1,149 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --sidebar-background: #f8fafc;
+  --sidebar-foreground: #334155;
+  --sidebar-border: #e2e8f0;
+  --sidebar-accent: #f1f5f9;
+}
+
+.dark {
+  --background: #090d16;
+  --foreground: #f8fafc;
+  --sidebar-background: #0f172a;
+  --sidebar-foreground: #cbd5e1;
+  --sidebar-border: #1e293b;
+  --sidebar-accent: #1e293b;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Notion-like Block Editor Styles */
+.tiptap {
+  outline: none;
+  min-height: 250px;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  color: #94a3b8;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.tiptap ul[data-type="taskList"] {
+  list-style: none;
+  padding: 0;
+}
+
+.tiptap ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  margin: 0.35rem 0;
+}
+
+.tiptap ul[data-type="taskList"] li > label {
+  flex: 0 0 auto;
+  margin-right: 0.6rem;
+  margin-top: 0.2rem;
+  user-select: none;
+}
+
+.tiptap ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+}
+
+.tiptap ul[data-type="taskList"] input[type="checkbox"] {
+  cursor: pointer;
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: #22c55e;
+  border-radius: 4px;
+}
+
+.tiptap blockquote {
+  border-left: 3px solid #3b82f6;
+  padding-left: 1rem;
+  color: #475569;
+  font-style: italic;
+  margin: 0.75rem 0;
+}
+
+.tiptap pre {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+
+.tiptap code {
+  background: #f1f5f9;
+  color: #ef4444;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-family: monospace;
+}
+
+.dark .tiptap code {
+  background: #1e293b;
+  color: #f87171;
+}
+
+/* Custom Callout Box */
+.tiptap .custom-callout {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.5rem;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  margin: 0.75rem 0;
+}
+
+.tiptap .custom-callout.callout-blocker {
+  background-color: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.tiptap .custom-callout.callout-tip {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.tiptap .custom-callout.callout-info {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+
+/* Multi-column Side-by-side Layout */
+.tiptap .column-list-wrapper {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+  width: 100%;
+}
+
+.tiptap .column-block {
+  min-width: 0;
+  height: 100%;
+}
+
