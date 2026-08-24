@@ -1,35 +1,51 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import React, { useEffect, useRef, useState } from 'react';
-import { Code2, Eye, GitGraph, RefreshCw } from 'lucide-react';
-import mermaid from 'mermaid';
-
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'neutral',
-  securityLevel: 'loose',
-});
+import { Code2, Eye, GitGraph } from 'lucide-react';
 
 const MermaidComponent = ({ node, updateAttributes }: any) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [code, setCode] = useState(node.attrs.code || 'graph TD\n  A[Feedmob 研发] --> B(Block 编辑器)\n  B --> C{多维投影}\n  C -->|时序流| D[Team Feed]\n  C -->|标签透视| E[Tag Matrix]');
+  const [code, setCode] = useState(
+    node.attrs.code ||
+      'graph TD\n  A[Feedmob 研发] --> B(Block 编辑器)\n  B --> C{多维投影}\n  C -->|时序流| D[Team Feed]\n  C -->|标签透视| E[Tag Matrix]'
+  );
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
-  const renderId = useRef(`mermaid-${Math.random().toString(36).substring(2, 9)}`);
-
-  const renderDiagram = async (currentCode: string) => {
-    try {
-      setError(null);
-      const { svg: renderedSvg } = await mermaid.render(renderId.current, currentCode);
-      setSvg(renderedSvg);
-    } catch (err: any) {
-      console.error('Mermaid render error', err);
-      setError(err?.message || 'Mermaid 语法解析失败');
-    }
-  };
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    renderDiagram(code);
+    let isMounted = true;
+
+    const renderDiagram = async () => {
+      if (typeof window === 'undefined') return;
+
+      try {
+        setError(null);
+        const mermaidModule = (await import('mermaid')).default;
+        mermaidModule.initialize({
+          startOnLoad: false,
+          theme: 'neutral',
+          securityLevel: 'loose',
+        });
+
+        const uniqueId = `mermaid-${Math.random().toString(36).substring(2, 9)}`;
+        const { svg: renderedSvg } = await mermaidModule.render(uniqueId, code);
+        if (isMounted) {
+          setSvg(renderedSvg);
+        }
+      } catch (err: any) {
+        console.warn('Mermaid render warning:', err);
+        if (isMounted) {
+          setError(err?.message || 'Mermaid 语法解析中...');
+        }
+      }
+    };
+
+    renderDiagram();
+
+    return () => {
+      isMounted = false;
+    };
   }, [code]);
 
   const handleCodeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -39,7 +55,7 @@ const MermaidComponent = ({ node, updateAttributes }: any) => {
   };
 
   return (
-    <NodeViewWrapper className="my-4 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-slate-50 dark:bg-slate-900 shadow-sm">
+    <NodeViewWrapper className="my-4 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-slate-50 dark:bg-slate-900 shadow-xs">
       {/* Header bar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
         <div className="flex items-center gap-1.5 font-medium">
@@ -51,7 +67,9 @@ const MermaidComponent = ({ node, updateAttributes }: any) => {
             type="button"
             onClick={() => setIsEditing(!isEditing)}
             className={`px-2 py-1 rounded flex items-center gap-1 transition ${
-              isEditing ? 'bg-white dark:bg-slate-700 text-indigo-600 font-semibold shadow-xs' : 'hover:bg-slate-200 dark:hover:bg-slate-700'
+              isEditing
+                ? 'bg-white dark:bg-slate-700 text-indigo-600 font-semibold shadow-xs'
+                : 'hover:bg-slate-200 dark:hover:bg-slate-700'
             }`}
           >
             {isEditing ? <Eye className="w-3 h-3" /> : <Code2 className="w-3 h-3" />}
@@ -72,7 +90,10 @@ const MermaidComponent = ({ node, updateAttributes }: any) => {
           />
         </div>
       ) : (
-        <div className="p-4 flex flex-col items-center justify-center bg-white dark:bg-slate-950 min-h-[120px] overflow-x-auto">
+        <div
+          ref={containerRef}
+          className="p-4 flex flex-col items-center justify-center bg-white dark:bg-slate-950 min-h-[120px] overflow-x-auto"
+        >
           {error ? (
             <div className="text-red-500 text-xs p-2 bg-red-50 dark:bg-red-950/40 rounded border border-red-200">
               {error}
@@ -98,7 +119,8 @@ export const MermaidNode = Node.create({
   addAttributes() {
     return {
       code: {
-        default: 'graph TD\n  A[Feedmob 研发] --> B(Block 编辑器)\n  B --> C{多维投影}\n  C -->|时序流| D[Team Feed]\n  C -->|标签透视| E[Tag Matrix]',
+        default:
+          'graph TD\n  A[Feedmob 研发] --> B(Block 编辑器)\n  B --> C{多维投影}\n  C -->|时序流| D[Team Feed]\n  C -->|标签透视| E[Tag Matrix]',
       },
     };
   },

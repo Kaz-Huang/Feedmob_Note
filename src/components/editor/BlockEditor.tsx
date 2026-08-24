@@ -79,6 +79,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
   const [slashTriggerPos, setSlashTriggerPos] = useState<number | null>(null);
 
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         heading: {

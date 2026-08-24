@@ -1,9 +1,22 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useCurrentUser } from '@/lib/user-context';
-import { BlockEditor } from '@/components/editor/BlockEditor';
 import { WorkLog } from '@/types';
+
+// Dynamic import with ssr: false prevents Tiptap/DOM hydration mismatches on Fast Refresh
+const BlockEditor = dynamic(
+  () => import('@/components/editor/BlockEditor').then((mod) => mod.BlockEditor),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center text-slate-400 text-xs animate-pulse">
+        正在加载 Block 编辑器...
+      </div>
+    ),
+  }
+);
 import {
   Calendar,
   Sparkles,
