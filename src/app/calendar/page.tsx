@@ -39,8 +39,9 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 pb-12">
+    <div className="flex flex-col gap-6 p-6 lg:p-8 max-w-6xl mx-auto w-full pb-12">
       <CalendarView logs={logs} onSelectDate={handleSelectDate} />
     </div>
   );
+
 }

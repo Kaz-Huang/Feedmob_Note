@@ -64,12 +64,13 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
 
   if (logs.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-slate-400">
-        <Sparkles className="w-8 h-8 mb-2 text-emerald-500 opacity-50" />
-        <p className="text-sm">暂无符合条件的团队日志</p>
+      <div className="flex flex-col items-center justify-center py-24 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 text-slate-400">
+        <Sparkles className="w-10 h-10 mb-3 text-emerald-500 opacity-60" />
+        <p className="text-base font-medium">暂无符合条件的团队日志</p>
       </div>
     );
   }
+
 
   return (
     <div className="flex flex-col gap-6">
@@ -97,31 +98,31 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
             }`}
           >
             {/* Card Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3.5">
                 {log.user?.avatar ? (
                   <img
                     src={log.user.avatar}
                     alt={log.user.name}
-                    className="w-10 h-10 rounded-full object-cover ring-2 ring-emerald-500/20"
+                    className="w-11 h-11 rounded-full object-cover ring-2 ring-emerald-500/20"
                   />
                 ) : (
-                  <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">
+                  <div className="w-11 h-11 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
                     {log.user?.name?.[0] || 'U'}
                   </div>
                 )}
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <span className="font-extrabold text-base text-slate-900 dark:text-slate-100">
                       {log.user?.name}
                     </span>
-                    <span className="text-xs px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                    <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
                       {log.user?.team?.name || log.user?.title || log.user?.role}
                     </span>
-                    {log.mood && <span className="text-base">{log.mood}</span>}
+                    {log.mood && <span className="text-lg">{log.mood}</span>}
                   </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
-                    <span>📅 {log.date}</span>
+                  <div className="text-xs text-slate-400 mt-1 flex items-center gap-2">
+                    <span className="font-semibold">📅 {log.date}</span>
                     <span>•</span>
                     <span>{new Date(log.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 提交</span>
                   </div>
@@ -131,15 +132,15 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
               {/* Badges (Blocker status, tags) */}
               <div className="flex items-center gap-2 flex-wrap">
                 {log.hasBlocker && (
-                  <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 animate-pulse">
-                    <AlertTriangle className="w-3.5 h-3.5" />
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 animate-pulse">
+                    <AlertTriangle className="w-4 h-4" />
                     <span>包含阻塞点</span>
                   </div>
                 )}
                 {log.tags?.map(({ tag }) => (
                   <span
                     key={tag.id}
-                    className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    className="px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
                   >
                     #{tag.name}
                   </span>
@@ -150,22 +151,22 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
             {/* Title & Body Content */}
             <div className="p-6">
               {log.title && (
-                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-3">
+                <h3 className="text-lg font-extrabold text-slate-900 dark:text-slate-100 mb-3.5">
                   {log.title}
                 </h3>
               )}
 
               {/* Text Summary/Snippet View */}
-              <div className="prose dark:prose-invert max-w-none text-xs text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-line bg-slate-50/50 dark:bg-slate-800/30 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
+              <div className="prose dark:prose-invert max-w-none text-sm sm:text-base text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-line bg-slate-50/60 dark:bg-slate-800/30 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
                 {log.contentText || '（暂无详细文本）'}
               </div>
             </div>
 
             {/* Reactions & Comments Bar */}
-            <div className="px-6 py-3.5 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-3">
+            <div className="px-6 py-4 bg-slate-50/60 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex flex-col gap-3.5">
               {/* Reactions Bar */}
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   {EMOJIS.map((emoji) => {
                     const data = reactionCounts[emoji];
                     return (
@@ -173,55 +174,55 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
                         key={emoji}
                         type="button"
                         onClick={() => handleToggleReaction(log.id, emoji)}
-                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition border ${
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm transition border ${
                           data?.hasReacted
                             ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 font-bold'
                             : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300'
                         }`}
                         title={data ? data.users.join(', ') : '签阅'}
                       >
-                        <span>{emoji}</span>
-                        {data && <span>{data.count}</span>}
+                        <span className="text-base">{emoji}</span>
+                        {data && <span className="font-bold">{data.count}</span>}
                       </button>
                     );
                   })}
                 </div>
 
-                <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                  <MessageSquare className="w-3.5 h-3.5" />
+                <div className="text-xs text-slate-400 flex items-center gap-1.5 font-medium">
+                  <MessageSquare className="w-4 h-4" />
                   <span>{log.comments?.length || 0} 条协作互动</span>
                 </div>
               </div>
 
               {/* Comments Stream */}
               {log.comments && log.comments.length > 0 && (
-                <div className="flex flex-col gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+                <div className="flex flex-col gap-2.5 pt-3 border-t border-slate-200/60 dark:border-slate-700/60">
                   {log.comments.map((c) => (
                     <div
                       key={c.id}
-                      className="flex items-start gap-2.5 p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 text-xs"
+                      className="flex items-start gap-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700/50 text-sm"
                     >
                       {c.user?.avatar ? (
                         <img
                           src={c.user.avatar}
                           alt={c.user.name}
-                          className="w-6 h-6 rounded-full object-cover"
+                          className="w-7 h-7 rounded-full object-cover"
                         />
                       ) : (
-                        <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 text-[10px] font-bold flex items-center justify-center">
+                        <div className="w-7 h-7 rounded-full bg-slate-300 dark:bg-slate-700 text-xs font-bold flex items-center justify-center">
                           {c.user?.name?.[0]}
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">
                             {c.user?.name}
                           </span>
-                          <span className="text-[10px] text-slate-400">
+                          <span className="text-xs text-slate-400">
                             {new Date(c.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
-                        <p className="text-slate-600 dark:text-slate-300 mt-0.5">
+                        <p className="text-slate-700 dark:text-slate-300 mt-1 leading-relaxed">
                           {c.content}
                         </p>
                       </div>
@@ -231,7 +232,7 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
               )}
 
               {/* Quick Comment Input */}
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex items-center gap-2.5 pt-1">
                 <input
                   type="text"
                   value={commentInputs[log.id] || ''}
@@ -242,15 +243,15 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
                     if (e.key === 'Enter') handleAddComment(log.id);
                   }}
                   placeholder="留下反馈或协助建议（按 Enter 发送）..."
-                  className="flex-1 text-xs px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 outline-none focus:ring-1 focus:ring-emerald-500"
+                  className="flex-1 text-sm px-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <button
                   type="button"
                   onClick={() => handleAddComment(log.id)}
                   disabled={isSubmittingComment === log.id}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition disabled:opacity-50"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 transition disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  <Send className="w-3.5 h-3.5" />
+                  <Send className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -260,3 +261,4 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
     </div>
   );
 };
+

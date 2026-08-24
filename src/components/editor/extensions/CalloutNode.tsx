@@ -41,13 +41,13 @@ const CalloutComponent = ({ node, updateAttributes }: any) => {
   const Icon = current.icon;
 
   return (
-    <NodeViewWrapper className={`my-3 p-3.5 rounded-lg border flex gap-3 transition-colors ${current.bg} ${current.border}`}>
-      <div className="flex flex-col items-center select-none pt-0.5">
+    <NodeViewWrapper className={`my-4 p-4 rounded-xl border flex gap-3.5 transition-colors ${current.bg} ${current.border}`}>
+      <div className="flex flex-col items-center select-none pt-0.5 shrink-0">
         <Icon className={`w-5 h-5 ${current.text}`} />
         <select
           value={type}
           onChange={(e) => updateAttributes({ type: e.target.value })}
-          className="mt-1 text-[10px] bg-transparent border-0 text-slate-500 hover:text-slate-700 cursor-pointer outline-none"
+          className="mt-1 text-xs bg-transparent border-0 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer outline-none font-medium"
         >
           <option value="blocker">⚠️ 卡点</option>
           <option value="tip">💡 提示</option>
@@ -55,12 +55,13 @@ const CalloutComponent = ({ node, updateAttributes }: any) => {
           <option value="success">🎯 目标</option>
         </select>
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 text-base leading-relaxed">
         <NodeViewContent className="outline-none text-slate-800 dark:text-slate-200" />
       </div>
     </NodeViewWrapper>
   );
 };
+
 
 export const CalloutNode = Node.create({
   name: 'callout',

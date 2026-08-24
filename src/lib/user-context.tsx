@@ -12,6 +12,10 @@ interface UserContextType {
   setSelectedTeamId: (teamId: string | null) => void;
   refreshUsers: () => Promise<void>;
   isLoading: boolean;
+  isSidebarCollapsed: boolean;
+  toggleSidebar: () => void;
+  isFullWidth: boolean;
+  toggleFullWidth: () => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -22,6 +26,38 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('feedmob_sidebar_collapsed') === 'true';
+    }
+    return false;
+  });
+  const [isFullWidth, setIsFullWidth] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('feedmob_editor_full_width') === 'true';
+    }
+    return false;
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('feedmob_sidebar_collapsed', String(next));
+      }
+      return next;
+    });
+  };
+
+  const toggleFullWidth = () => {
+    setIsFullWidth((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('feedmob_editor_full_width', String(next));
+      }
+      return next;
+    });
+  };
 
   const fetchUsersAndTeams = async () => {
     try {
@@ -37,7 +73,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setUsers(usersData);
         setTeams(teamsData);
 
-        // Restore saved user or default to first user (Alex Chen)
+        // Restore saved user or default to first user
         const savedUserId = typeof window !== 'undefined' ? localStorage.getItem('feedmob_active_user_id') : null;
         const matched = usersData.find((u: User) => u.id === savedUserId);
         if (matched) {
@@ -75,12 +111,17 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setSelectedTeamId,
         refreshUsers: fetchUsersAndTeams,
         isLoading,
+        isSidebarCollapsed,
+        toggleSidebar,
+        isFullWidth,
+        toggleFullWidth,
       }}
     >
       {children}
     </UserContext.Provider>
   );
 }
+
 
 export function useCurrentUser() {
   const context = useContext(UserContext);

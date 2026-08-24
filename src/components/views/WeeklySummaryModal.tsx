@@ -87,16 +87,16 @@ export const WeeklySummaryModal: React.FC<WeeklySummaryModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
       <div className="w-full max-w-3xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
-              <Sparkles className="w-5 h-5" />
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
+              <Sparkles className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+              <h2 className="text-lg font-extrabold text-slate-900 dark:text-slate-100">
                 一键聚合生成工作周报
               </h2>
-              <p className="text-xs text-slate-400">
+              <p className="text-sm text-slate-400 mt-0.5">
                 自动聚合所选时间跨度与部门的全员日志，一键生成标准汇报格式
               </p>
             </div>
@@ -104,37 +104,37 @@ export const WeeklySummaryModal: React.FC<WeeklySummaryModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Filter Controls */}
-        <div className="flex flex-wrap items-center gap-3 px-6 py-3 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 text-xs">
+        <div className="flex flex-wrap items-center gap-4 px-6 py-3.5 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 text-sm">
           <div className="flex items-center gap-2">
-            <span className="text-slate-500 font-medium">起止时间:</span>
+            <span className="text-slate-600 dark:text-slate-400 font-semibold">起止时间:</span>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+              className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-medium"
             />
             <span className="text-slate-400">至</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+              className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-medium"
             />
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-slate-500 font-medium">部门筛选:</span>
+            <span className="text-slate-600 dark:text-slate-400 font-semibold">部门筛选:</span>
             <select
               value={teamFilter}
               onChange={(e) => setTeamFilter(e.target.value)}
-              className="px-2 py-1 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+              className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 font-medium"
             >
               <option value="">全部部门</option>
               {teams.map((t) => (
@@ -147,9 +147,9 @@ export const WeeklySummaryModal: React.FC<WeeklySummaryModalProps> = ({
         </div>
 
         {/* Markdown Preview Area */}
-        <div className="p-6 flex-1 overflow-y-auto bg-slate-900 text-slate-100 font-mono text-xs leading-relaxed">
+        <div className="p-6 flex-1 overflow-y-auto bg-slate-900 text-slate-100 font-mono text-sm leading-relaxed">
           {isLoading ? (
-            <div className="flex items-center justify-center py-20 text-slate-400">
+            <div className="flex items-center justify-center py-20 text-slate-400 text-sm">
               正在聚合数据并生成周报...
             </div>
           ) : (
@@ -159,15 +159,15 @@ export const WeeklySummaryModal: React.FC<WeeklySummaryModalProps> = ({
 
         {/* Footer Actions */}
         <div className="flex items-center justify-between px-6 py-4 bg-slate-50 dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700">
-          <span className="text-xs text-slate-500">
+          <span className="text-xs sm:text-sm text-slate-500 font-medium">
             支持一键复制到剪贴板或导出为 Markdown 文件
           </span>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={handleCopy}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition active:scale-95"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition active:scale-95 shadow-xs"
             >
               {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               <span>{copied ? '已复制周报' : '复制到剪贴板'}</span>
@@ -176,7 +176,7 @@ export const WeeklySummaryModal: React.FC<WeeklySummaryModalProps> = ({
             <button
               type="button"
               onClick={handleDownload}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 transition active:scale-95"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 transition active:scale-95"
             >
               <Download className="w-4 h-4" />
               <span>下载 .md</span>
@@ -187,3 +187,4 @@ export const WeeklySummaryModal: React.FC<WeeklySummaryModalProps> = ({
     </div>
   );
 };
+

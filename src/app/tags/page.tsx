@@ -33,9 +33,9 @@ export default function TagsPage() {
   }, [selectedTeamId]);
 
   return (
-    <div className="flex flex-col gap-6 pb-12">
+    <div className="flex flex-col gap-6 p-6 lg:p-8 max-w-6xl mx-auto w-full pb-12">
       {isLoading ? (
-        <div className="py-20 text-center text-xs text-slate-400">
+        <div className="py-20 text-center text-sm text-slate-400">
           正在加载标签矩阵...
         </div>
       ) : (
@@ -43,4 +43,5 @@ export default function TagsPage() {
       )}
     </div>
   );
+
 }

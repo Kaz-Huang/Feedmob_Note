@@ -52,14 +52,14 @@ export const SLASH_ITEMS: SlashItem[] = [
             {
               type: 'taskItem',
               attrs: { checked: false },
-              content: [{ type: 'paragraph', content: [{ type: 'text', text: '重点任务 1：' }] }],
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }],
             },
           ],
         },
         {
           type: 'callout',
           attrs: { type: 'blocker' },
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: '【Blocker】如有卡点请在此说明，若无请删除本块' }] }],
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: '【Blocker】' }] }],
         },
         {
           type: 'heading',
@@ -72,7 +72,7 @@ export const SLASH_ITEMS: SlashItem[] = [
             {
               type: 'taskItem',
               attrs: { checked: false },
-              content: [{ type: 'paragraph', content: [{ type: 'text', text: '计划任务 1：' }] }],
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }],
             },
           ],
         },
@@ -113,7 +113,7 @@ export const SLASH_ITEMS: SlashItem[] = [
       editor.chain().focus().insertContent({
         type: 'mermaid',
         attrs: {
-          code: 'graph TD\n  A[Feedmob 研发] --> B(Block 编辑器)\n  B --> C[完成交付]',
+          code: 'graph TD\n  A[开始] --> B[处理]\n  B --> C[结束]',
         },
       }).run();
     },
@@ -143,11 +143,11 @@ export const SLASH_ITEMS: SlashItem[] = [
         content: [
           {
             type: 'column',
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: '👈 左栏内容 (输入 / 插入图表或组件)' }] }],
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }],
           },
           {
             type: 'column',
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: '👉 右栏内容 (同行并排显示)' }] }],
+            content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }],
           },
         ],
       }).run();
@@ -306,15 +306,15 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
         top: `${position.y}px`,
         left: `${position.x}px`,
       }}
-      className="fixed z-50 w-72 max-h-80 overflow-y-auto bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 p-1.5 flex flex-col gap-0.5 animate-in fade-in zoom-in-95 duration-75"
+      className="fixed z-50 w-80 max-h-96 overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex flex-col gap-1 animate-in fade-in zoom-in-95 duration-75"
     >
-      <div className="px-2 py-1 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center justify-between">
+      <div className="px-3 py-1.5 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center justify-between">
         <span>插入 Block 组件</span>
         {cleanQuery && <span className="text-emerald-500">过滤: "{cleanQuery}"</span>}
       </div>
 
       {filteredItems.length === 0 ? (
-        <div className="py-4 text-center text-xs text-slate-400">
+        <div className="py-5 text-center text-sm text-slate-400">
           未找到匹配的 Block 组件
         </div>
       ) : (
@@ -332,26 +332,26 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
                 onClose();
               }}
               onMouseEnter={() => setSelectedIndex(index)}
-              className={`flex items-start gap-2.5 px-2.5 py-2 rounded-lg text-left transition text-xs ${
+              className={`flex items-start gap-3 px-3 py-2.5 rounded-xl text-left transition ${
                 isSelected
                   ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200'
                   : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
               }`}
             >
               <div
-                className={`p-1.5 rounded-md mt-0.5 ${
+                className={`p-2 rounded-lg mt-0.5 ${
                   isSelected
                     ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4.5 h-4.5" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">
+                <div className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
                   {item.title}
                 </div>
-                <div className="text-[10px] text-slate-400 truncate">
+                <div className="text-xs text-slate-400 truncate mt-0.5">
                   {item.description}
                 </div>
               </div>
@@ -362,3 +362,4 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
     </div>
   );
 };
+

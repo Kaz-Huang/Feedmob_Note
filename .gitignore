@@ -36,3 +36,7 @@ yarn-error.log*
 # SQLite local database
 prisma/dev.db
 prisma/dev.db-journal
+
+# Local runtime
+.runtime/
+
