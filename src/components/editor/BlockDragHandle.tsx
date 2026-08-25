@@ -168,7 +168,11 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     const container = editorContainerRef.current;
     if (!container || !editor) return;
 
-    const isBlockDrag = () => dragSourceRef.current !== null;
+    const isBlockDrag = () =>
+      dragSourceRef.current !== null ||
+      (typeof window !== 'undefined' &&
+        (window as any).__feedmobDraggedBlockPos !== undefined &&
+        (window as any).__feedmobDraggedBlockPos !== null);
 
     const handleDragOver = (e: DragEvent) => {
       if (!isBlockDrag()) return;
@@ -345,7 +349,6 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
             top: `${handleTop}px`,
             left: `${handleLeft}px`,
             opacity: isDragging ? 0 : 1,
-            pointerEvents: isDragging ? 'none' : 'auto',
           }}
           className="absolute z-20 flex items-center gap-1 select-none transition-opacity duration-150"
         >
@@ -383,6 +386,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                   return;
                 }
                 dragSourceRef.current = { pos: blockPos, dom: activeDomNode };
+                if (typeof window !== 'undefined') {
+                  (window as any).__feedmobDraggedBlockPos = blockPos;
+                  (window as any).__feedmobDraggedDom = activeDomNode;
+                }
                 setIsDragging(true);
 
                 try {
@@ -400,6 +407,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 activeDomNode.style.transition = 'opacity 0.15s ease, filter 0.15s ease';
               }}
               onDragEnd={() => {
+                if (typeof window !== 'undefined') {
+                  (window as any).__feedmobDraggedBlockPos = null;
+                  (window as any).__feedmobDraggedDom = null;
+                }
                 const source = dragSourceRef.current;
                 if (source) {
                   source.dom.style.opacity = '';

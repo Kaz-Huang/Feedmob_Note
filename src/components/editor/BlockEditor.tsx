@@ -167,26 +167,40 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
       }
     },
     editorProps: {
-      // Notion-style block drop: move the dragged block to the drop target.
-      // Returning true for block drags prevents ProseMirror's default
-      // behavior of inserting the dataTransfer text into the document
-      // (the "random number" bug).
+      handleDOMEvents: {
+        dragover: (view, event) => {
+          const isBlock = typeof window !== 'undefined' && (window as any).__feedmobDraggedBlockPos !== undefined && (window as any).__feedmobDraggedBlockPos !== null;
+          if (isBlock) {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+            return true;
+          }
+          return false;
+        },
+      },
       handleDrop: (view, event) => {
         const dt = event.dataTransfer;
-        if (!dt) return false;
+        let sourcePos: number | null = null;
 
-        let sourceStr = '';
-        try {
-          sourceStr = dt.getData(BLOCK_DRAG_MIME);
-        } catch {
+        if (dt) {
+          try {
+            const sourceStr = dt.getData(BLOCK_DRAG_MIME);
+            if (sourceStr) sourcePos = parseInt(sourceStr, 10);
+          } catch {}
+        }
+
+        if ((sourcePos === null || !Number.isFinite(sourcePos)) && typeof window !== 'undefined') {
+          const globalPos = (window as any).__feedmobDraggedBlockPos;
+          if (typeof globalPos === 'number' && Number.isFinite(globalPos)) {
+            sourcePos = globalPos;
+          }
+        }
+
+        if (sourcePos === null || !Number.isFinite(sourcePos) || !editor) {
           return false;
         }
-        if (sourceStr === '') return false; // not a block drag → default
 
         event.preventDefault();
-        const sourcePos = parseInt(sourceStr, 10);
-        if (!Number.isFinite(sourcePos) || !editor) return true;
-
         const dropTarget = computeBlockDropTarget(view, event.clientX, event.clientY);
         if (dropTarget !== null) {
           moveBlockToDropTarget(editor, sourcePos, dropTarget);
