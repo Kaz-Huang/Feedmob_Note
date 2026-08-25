@@ -13,6 +13,9 @@ import {
   Code2,
   Quote,
   Sparkles,
+  List,
+  ListOrdered,
+  Minus,
 } from 'lucide-react';
 
 export interface SlashItem {
@@ -214,6 +217,36 @@ export const SLASH_ITEMS: SlashItem[] = [
     action: (editor, range) => {
       if (range) editor.chain().focus().deleteRange(range).run();
       editor.chain().focus().toggleBlockquote().run();
+    },
+  },
+  {
+    title: '无序列表 (Bullet List)',
+    description: '标准圆点项目列表',
+    keywords: ['bullet', 'list', 'wuxu', 'liebiao', 'ul', '-'],
+    icon: List,
+    action: (editor, range) => {
+      if (range) editor.chain().focus().deleteRange(range).run();
+      editor.chain().focus().toggleBulletList().run();
+    },
+  },
+  {
+    title: '有序列表 (Numbered List)',
+    description: '带数字编号的项目列表',
+    keywords: ['numbered', 'order', 'youxu', 'liebiao', 'ol', '1.'],
+    icon: ListOrdered,
+    action: (editor, range) => {
+      if (range) editor.chain().focus().deleteRange(range).run();
+      editor.chain().focus().toggleOrderedList().run();
+    },
+  },
+  {
+    title: '分割线 (Divider)',
+    description: '用于区分段落的水平分割线',
+    keywords: ['divider', 'hr', 'line', 'fengexian', '---'],
+    icon: Minus,
+    action: (editor, range) => {
+      if (range) editor.chain().focus().deleteRange(range).run();
+      editor.chain().focus().setHorizontalRule().run();
     },
   },
   {

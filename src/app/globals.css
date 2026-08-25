@@ -179,18 +179,3 @@ body {
   color: #1e40af;
 }
 
-/* Multi-column Side-by-side Layout */
-.tiptap .column-list-wrapper {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.25rem;
-  margin: 1.25rem 0;
-  width: 100%;
-}
-
-.tiptap .column-block {
-  min-width: 0;
-  height: 100%;
-}
-
-

@@ -105,7 +105,7 @@ export default function TodayFocusPage() {
   return (
     <div className="flex-1 flex flex-col w-full min-h-[calc(100vh-4rem)] bg-white dark:bg-slate-950">
       {/* Top Notion-style Sub-header Bar (Date switcher & Breadcrumb) */}
-      <div className="sticky top-0 z-20 flex items-center justify-between px-6 sm:px-12 py-3 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800/80">
+      <div className="sticky top-0 z-20 flex items-center justify-between px-6 sm:px-12 lg:px-16 py-3 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800/80">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold text-slate-400 dark:text-slate-500">工作日志 /</span>
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">

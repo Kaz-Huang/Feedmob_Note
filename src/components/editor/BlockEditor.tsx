@@ -20,7 +20,7 @@ import { BlockDragHandle } from './BlockDragHandle';
 import { moveBlock, duplicateBlock } from './utils/block-movement';
 import {
   computeBlockDropTarget,
-  moveBlockToPosition,
+  moveBlockToDropTarget,
   BLOCK_DRAG_MIME,
 } from './utils/block-movement';
 import { useCurrentUser } from '@/lib/user-context';
@@ -187,11 +187,33 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         const sourcePos = parseInt(sourceStr, 10);
         if (!Number.isFinite(sourcePos) || !editor) return true;
 
-        const targetPos = computeBlockDropTarget(view, event.clientX, event.clientY);
-        if (targetPos !== null) {
-          moveBlockToPosition(editor, sourcePos, targetPos);
+        const dropTarget = computeBlockDropTarget(view, event.clientX, event.clientY);
+        if (dropTarget !== null) {
+          moveBlockToDropTarget(editor, sourcePos, dropTarget);
         }
         return true;
+      },
+      handleClick: (view, pos, event) => {
+        const dom = event.target as HTMLElement;
+        if (dom && dom.classList && dom.classList.contains('tiptap')) {
+          const { doc } = view.state;
+          const lastChild = doc.lastChild;
+          const isLastEmpty =
+            lastChild &&
+            lastChild.type.name === 'paragraph' &&
+            lastChild.content.size === 0;
+
+          if (!isLastEmpty && editor) {
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(doc.content.size, { type: 'paragraph' })
+              .setTextSelection(doc.content.size + 1)
+              .run();
+            return true;
+          }
+        }
+        return false;
       },
       handleKeyDown: (view, event) => {
         // Handle Alt + ArrowUp to move block up
@@ -302,7 +324,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
   const { isFullWidth, toggleFullWidth } = useCurrentUser();
   const containerWidthClass = isFullWidth
     ? 'w-full px-6 sm:px-12 lg:px-16'
-    : 'max-w-5xl xl:max-w-6xl mx-auto w-full px-6 sm:px-12';
+    : 'max-w-6xl xl:max-w-7xl mx-auto w-full px-6 sm:px-12 lg:px-16';
 
   return (
     <div className="flex-1 flex flex-col w-full bg-white dark:bg-slate-950">
@@ -441,16 +463,36 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
       <div
         className={`flex-1 w-full ${containerWidthClass} py-8 pb-72 flex flex-col cursor-text transition-all duration-200`}
         onClick={(e) => {
-          // If clicking anywhere in the spacious canvas or bottom buffer, focus the editor at end
-          if (editor) {
-            const isInsideInputOrButton = (e.target as HTMLElement).closest('input, button, select, textarea, [data-bubble-menu="true"]');
-            if (!isInsideInputOrButton && e.target !== containerRef.current) {
-              editor.commands.focus('end');
-            }
+          if (!editor) return;
+          const target = e.target as HTMLElement;
+          if (target.closest('input, button, select, textarea, [data-bubble-menu="true"]')) {
+            return;
+          }
+
+          // If clicking anywhere in the spacious canvas or bottom buffer:
+          const { doc } = editor.state;
+          const lastChild = doc.lastChild;
+
+          const isLastChildEmptyParagraph =
+            lastChild &&
+            lastChild.type.name === 'paragraph' &&
+            lastChild.content.size === 0;
+
+          if (!isLastChildEmptyParagraph) {
+            // Last block has text/content: insert a fresh block below and focus it
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(doc.content.size, { type: 'paragraph' })
+              .setTextSelection(doc.content.size + 1)
+              .run();
+          } else {
+            // Already an empty block at the end: focus it directly
+            editor.commands.focus('end');
           }
         }}
       >
-        <div ref={containerRef} className="relative pl-10 sm:pl-12 flex-1 flex flex-col">
+        <div ref={containerRef} className="relative pl-14 sm:pl-16 flex-1 flex flex-col">
           {/* Notion-style Floating Block Drag & Action Handle */}
           <BlockDragHandle editor={editor} editorContainerRef={containerRef} />
 

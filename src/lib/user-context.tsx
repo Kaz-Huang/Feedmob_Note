@@ -34,9 +34,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   });
   const [isFullWidth, setIsFullWidth] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('feedmob_editor_full_width') === 'true';
+      const saved = localStorage.getItem('feedmob_editor_full_width');
+      return saved !== null ? saved === 'true' : true;
     }
-    return false;
+    return true;
   });
 
   const toggleSidebar = () => {
