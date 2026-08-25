@@ -211,87 +211,101 @@ export interface BlockDropTarget {
 
 /**
  * Compute the 4-zone drop target (above, below, left, right) for block drag and drop.
- * - Left/Right edges (15% each): Side-by-side columns (vertical indicator)
- * - Center 70%: Vertical insert above/below (horizontal indicator)
+ * Uses elementFromPoint and posAtDOM to guarantee reliable DOM and position resolution.
  */
 export function computeBlockDropTarget(
   view: EditorView,
   clientX: number,
   clientY: number
 ): BlockDropTarget | null {
-  let coords: { pos: number; inside: number } | null = null;
-  try {
-    coords = view.posAtCoords({ left: clientX, top: clientY });
-  } catch {
-    return null;
+  const editorDom = view.dom;
+  if (!editorDom) return null;
+
+  // 1. Find the element under mouse coordinates
+  let element = document.elementFromPoint(clientX, clientY);
+  if (!element || !editorDom.contains(element)) {
+    const editorRect = editorDom.getBoundingClientRect();
+    const midX = Math.min(Math.max(clientX, editorRect.left + 20), editorRect.right - 20);
+    element = document.elementFromPoint(midX, clientY);
   }
-  if (!coords) return null;
 
-  const { doc } = view.state;
-
-  // If pointer is past the end of document, target is below the last block
-  if (coords.pos >= doc.content.size) {
-    if (doc.lastChild) {
-      const lastPos = doc.content.size - doc.lastChild.nodeSize;
-      const dom = view.nodeDOM(lastPos);
-      const rect = dom instanceof HTMLElement
-        ? dom.getBoundingClientRect()
-        : { top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0 };
-      return {
-        zone: 'below',
-        targetPos: lastPos,
-        targetNode: doc.lastChild,
-        rect: {
-          top: rect.top,
-          left: rect.left,
-          width: rect.width,
-          height: rect.height,
-        },
-        indicator: {
-          top: rect.bottom - 1.5,
-          left: rect.left,
-          width: rect.width,
-          height: 3,
-          isVertical: false,
-        },
-      };
+  if (!element || !editorDom.contains(element)) {
+    const lastChild = view.state.doc.lastChild;
+    if (lastChild) {
+      const lastPos = view.state.doc.content.size - lastChild.nodeSize;
+      const lastDom = view.dom.lastElementChild as HTMLElement | null;
+      if (lastDom) {
+        const rect = lastDom.getBoundingClientRect();
+        return {
+          zone: 'below',
+          targetPos: lastPos,
+          targetNode: lastChild,
+          rect: {
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+            height: rect.height,
+          },
+          indicator: {
+            top: rect.bottom - 1.75,
+            left: rect.left,
+            width: rect.width,
+            height: 3.5,
+            isVertical: false,
+          },
+        };
+      }
     }
     return null;
   }
 
-  let blockPos: number;
+  // 2. Find the enclosing block element (either child of .tiptap or child of [data-type="column"])
+  const columnEl = element.closest('[data-type="column"]');
+  let blockEl: HTMLElement = element as HTMLElement;
+
+  if (columnEl && editorDom.contains(columnEl)) {
+    while (blockEl && blockEl.parentElement !== columnEl && blockEl !== columnEl) {
+      blockEl = blockEl.parentElement as HTMLElement;
+    }
+  } else {
+    while (blockEl && blockEl.parentElement !== editorDom && blockEl !== editorDom) {
+      blockEl = blockEl.parentElement as HTMLElement;
+    }
+  }
+
+  if (!blockEl || blockEl === editorDom) {
+    return null;
+  }
+
+  // 3. Resolve the ProseMirror block position from the DOM element
+  let blockPos = 0;
   try {
-    const $pos = doc.resolve(coords.pos);
-    if ($pos.depth >= 1) {
+    const pos = view.posAtDOM(blockEl, 0);
+    if (pos < 0) return null;
+    const $pos = view.state.doc.resolve(pos);
+    for (let d = $pos.depth; d >= 1; d--) {
+      const n = $pos.node(d);
+      if (n.isBlock && n.type.name !== 'column' && n.type.name !== 'columnList') {
+        blockPos = $pos.before(d);
+        break;
+      }
+    }
+    if (blockPos === 0 && $pos.depth >= 1) {
       blockPos = $pos.before(1);
-    } else {
-      blockPos = coords.pos;
     }
   } catch {
     return null;
   }
 
-  const node = doc.nodeAt(blockPos);
-  if (!node) {
-    return null;
-  }
+  const node = view.state.doc.nodeAt(blockPos);
+  if (!node) return null;
 
-  const dom = view.nodeDOM(blockPos);
-  if (!(dom instanceof HTMLElement)) {
-    return null;
-  }
-
-  const rect = dom.getBoundingClientRect();
+  const rect = blockEl.getBoundingClientRect();
   const relX = clientX - rect.left;
   const relY = clientY - rect.top;
   const widthRatio = rect.width > 0 ? relX / rect.width : 0.5;
 
   let zone: DropZone = 'below';
-
-  // Notion 4-Quadrant Priority:
-  // - Left 15%: column left
-  // - Right 15%: column right
-  // - Center 70%: upper half above, lower half below
   const SIDE_THRESHOLD = 0.15;
 
   if (widthRatio <= SIDE_THRESHOLD) {
@@ -305,31 +319,31 @@ export function computeBlockDropTarget(
   let indTop = rect.top;
   let indLeft = rect.left;
   let indWidth = rect.width;
-  let indHeight = 3;
+  let indHeight = 3.5;
   let isVertical = false;
 
   if (zone === 'above') {
-    indTop = rect.top - 1.5;
+    indTop = rect.top - 1.75;
     indLeft = rect.left;
     indWidth = rect.width;
-    indHeight = 3;
+    indHeight = 3.5;
     isVertical = false;
   } else if (zone === 'below') {
-    indTop = rect.bottom - 1.5;
+    indTop = rect.bottom - 1.75;
     indLeft = rect.left;
     indWidth = rect.width;
-    indHeight = 3;
+    indHeight = 3.5;
     isVertical = false;
   } else if (zone === 'left') {
     indTop = rect.top;
     indLeft = rect.left - 2;
-    indWidth = 3;
+    indWidth = 3.5;
     indHeight = Math.max(24, rect.height);
     isVertical = true;
   } else if (zone === 'right') {
     indTop = rect.top;
-    indLeft = rect.right - 1;
-    indWidth = 3;
+    indLeft = rect.right - 1.5;
+    indWidth = 3.5;
     indHeight = Math.max(24, rect.height);
     isVertical = true;
   }

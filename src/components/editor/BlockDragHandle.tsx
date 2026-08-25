@@ -207,7 +207,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
 
     const handleDragLeave = (e: DragEvent) => {
       if (!isBlockDrag()) return;
-      if (!container.contains(e.relatedTarget as Node)) {
+      if (!e.relatedTarget || !container.contains(e.relatedTarget as Node)) {
         setDropIndicator(null);
       }
     };
@@ -215,18 +215,16 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     // Safety net: drops landing in the container but outside the editor DOM
     // (padding area) must not trigger browser default behavior.
     const handleDrop = (e: DragEvent) => {
-      if (!isBlockDrag()) return;
-      e.preventDefault();
       setDropIndicator(null);
     };
 
-    container.addEventListener('dragover', handleDragOver);
-    container.addEventListener('dragleave', handleDragLeave);
-    container.addEventListener('drop', handleDrop);
+    window.addEventListener('dragover', handleDragOver, { passive: false });
+    window.addEventListener('dragleave', handleDragLeave);
+    window.addEventListener('drop', handleDrop);
     return () => {
-      container.removeEventListener('dragover', handleDragOver);
-      container.removeEventListener('dragleave', handleDragLeave);
-      container.removeEventListener('drop', handleDrop);
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('dragleave', handleDragLeave);
+      window.removeEventListener('drop', handleDrop);
     };
   }, [editor, editorContainerRef]);
 
