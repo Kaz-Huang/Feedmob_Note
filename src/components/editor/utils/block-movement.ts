@@ -200,16 +200,19 @@ export interface BlockDropTarget {
     width: number;
     height: number;
   };
-  ghostRect: {
+  indicator: {
     top: number;
     left: number;
     width: number;
     height: number;
+    isVertical: boolean;
   };
 }
 
 /**
  * Compute the 4-zone drop target (above, below, left, right) for block drag and drop.
+ * - Left/Right edges (15% each): Side-by-side columns (vertical indicator)
+ * - Center 70%: Vertical insert above/below (horizontal indicator)
  */
 export function computeBlockDropTarget(
   view: EditorView,
@@ -231,7 +234,9 @@ export function computeBlockDropTarget(
     if (doc.lastChild) {
       const lastPos = doc.content.size - doc.lastChild.nodeSize;
       const dom = view.nodeDOM(lastPos);
-      const rect = dom instanceof HTMLElement ? dom.getBoundingClientRect() : { top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0 };
+      const rect = dom instanceof HTMLElement
+        ? dom.getBoundingClientRect()
+        : { top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0 };
       return {
         zone: 'below',
         targetPos: lastPos,
@@ -242,11 +247,12 @@ export function computeBlockDropTarget(
           width: rect.width,
           height: rect.height,
         },
-        ghostRect: {
-          top: rect.bottom,
+        indicator: {
+          top: rect.bottom - 1.5,
           left: rect.left,
           width: rect.width,
-          height: 28,
+          height: 3,
+          isVertical: false,
         },
       };
     }
@@ -282,9 +288,10 @@ export function computeBlockDropTarget(
 
   let zone: DropZone = 'below';
 
-  // Zone detection: Notion-style priorities
-  // - Left/Right edges (15% each) → column merge
-  // - Center 70% → above/below based on vertical position
+  // Notion 4-Quadrant Priority:
+  // - Left 15%: column left
+  // - Right 15%: column right
+  // - Center 70%: upper half above, lower half below
   const SIDE_THRESHOLD = 0.15;
 
   if (widthRatio <= SIDE_THRESHOLD) {
@@ -292,36 +299,39 @@ export function computeBlockDropTarget(
   } else if (widthRatio >= 1 - SIDE_THRESHOLD) {
     zone = 'right';
   } else {
-    // Center zone: upper half → above, lower half → below
     zone = relY < rect.height * 0.5 ? 'above' : 'below';
   }
 
-  // Calculate ghost drop preview bounding box
-  let ghostTop = rect.top;
-  let ghostLeft = rect.left;
-  let ghostWidth = rect.width;
-  let ghostHeight = Math.max(36, rect.height);
+  let indTop = rect.top;
+  let indLeft = rect.left;
+  let indWidth = rect.width;
+  let indHeight = 3;
+  let isVertical = false;
 
-  if (zone === 'right') {
-    ghostTop = rect.top;
-    ghostLeft = rect.left + rect.width * 0.5 + 4;
-    ghostWidth = rect.width * 0.5 - 4;
-    ghostHeight = Math.max(36, rect.height);
-  } else if (zone === 'left') {
-    ghostTop = rect.top;
-    ghostLeft = rect.left;
-    ghostWidth = rect.width * 0.5 - 4;
-    ghostHeight = Math.max(36, rect.height);
-  } else if (zone === 'above') {
-    ghostTop = rect.top - 16;
-    ghostLeft = rect.left;
-    ghostWidth = rect.width;
-    ghostHeight = 28;
+  if (zone === 'above') {
+    indTop = rect.top - 1.5;
+    indLeft = rect.left;
+    indWidth = rect.width;
+    indHeight = 3;
+    isVertical = false;
   } else if (zone === 'below') {
-    ghostTop = rect.bottom;
-    ghostLeft = rect.left;
-    ghostWidth = rect.width;
-    ghostHeight = 28;
+    indTop = rect.bottom - 1.5;
+    indLeft = rect.left;
+    indWidth = rect.width;
+    indHeight = 3;
+    isVertical = false;
+  } else if (zone === 'left') {
+    indTop = rect.top;
+    indLeft = rect.left - 2;
+    indWidth = 3;
+    indHeight = Math.max(24, rect.height);
+    isVertical = true;
+  } else if (zone === 'right') {
+    indTop = rect.top;
+    indLeft = rect.right - 1;
+    indWidth = 3;
+    indHeight = Math.max(24, rect.height);
+    isVertical = true;
   }
 
   return {
@@ -334,11 +344,12 @@ export function computeBlockDropTarget(
       width: rect.width,
       height: rect.height,
     },
-    ghostRect: {
-      top: ghostTop,
-      left: ghostLeft,
-      width: ghostWidth,
-      height: ghostHeight,
+    indicator: {
+      top: indTop,
+      left: indLeft,
+      width: indWidth,
+      height: indHeight,
+      isVertical,
     },
   };
 }
@@ -374,7 +385,7 @@ export function moveBlockToDropTarget(
       return true; // Already at position
     }
 
-    // Strategy: always delete first, then use mapping to find the correct insert position
+    // Delete source first, map insertion target, insert sourceNode
     tr.delete(sourcePos, sourcePos + sourceNode.nodeSize);
     const mappedInsert = tr.mapping.map(insertBoundary);
     const safeInsert = Math.max(0, Math.min(mappedInsert, tr.doc.content.size));
@@ -385,7 +396,6 @@ export function moveBlockToDropTarget(
       tr.setSelection(TextSelection.near(tr.doc.resolve(selPos)));
     } catch {}
 
-    cleanupColumnLists(tr, schema);
     view.dispatch(tr);
     return true;
   }
@@ -440,7 +450,6 @@ export function moveBlockToDropTarget(
       tr.delete(mappedSourcePos, mappedSourcePos + sourceSize);
     }
 
-    cleanupColumnLists(tr, schema);
     view.dispatch(tr);
     editor.commands.focus();
     return true;
@@ -448,61 +457,3 @@ export function moveBlockToDropTarget(
 
   return false;
 }
-
-function cleanupColumnLists(tr: any, schema: any) {
-  const columnListType = schema.nodes.columnList;
-  if (!columnListType) return;
-
-  // Scan-process-rescan: process one degenerate columnList at a time,
-  // then re-scan the updated document. This avoids stale position bugs
-  // when multiple columnLists need cleanup.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    let found: { pos: number; node: ProseMirrorNode } | null = null;
-
-    tr.doc.descendants((node: ProseMirrorNode, pos: number) => {
-      if (found) return false; // stop after first match
-      if (node.type === columnListType) {
-        let validColumnsCount = 0;
-        node.forEach((col: ProseMirrorNode) => {
-          if (col.childCount > 0) {
-            validColumnsCount++;
-          }
-        });
-        if (validColumnsCount <= 1) {
-          found = { pos, node };
-        }
-        return false; // don't descend into columnList children
-      }
-      return true;
-    });
-
-    if (found) {
-      const { pos, node } = found as { pos: number; node: ProseMirrorNode };
-      const blocks: ProseMirrorNode[] = [];
-      node.forEach((col: ProseMirrorNode) => {
-        col.forEach((b: ProseMirrorNode) => blocks.push(b));
-      });
-      if (blocks.length === 0) {
-        blocks.push(schema.nodes.paragraph.create());
-      }
-      tr.replaceWith(pos, pos + node.nodeSize, blocks);
-      changed = true;
-    }
-  }
-}
-
-// Backward compatibility alias
-export const moveBlockToPosition = (editor: Editor, sourcePos: number, targetPos: number) => {
-  const doc = editor.state.doc;
-  const targetNode = doc.nodeAt(targetPos) || doc.lastChild;
-  if (!targetNode) return false;
-  return moveBlockToDropTarget(editor, sourcePos, {
-    zone: 'above',
-    targetPos,
-    targetNode,
-    rect: { top: 0, left: 0, width: 0, height: 0 },
-    ghostRect: { top: 0, left: 0, width: 0, height: 0 },
-  });
-};
