@@ -216,9 +216,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       }
     };
 
-    // Safety net: drops landing in the container but outside the editor DOM
-    // (padding area) must not trigger browser default behavior.
     const handleDrop = (e: DragEvent) => {
+      document.querySelectorAll('.feedmob-drag-source-active').forEach((el) => {
+        el.classList.remove('feedmob-drag-source-active');
+      });
       setDropIndicator(null);
     };
 
@@ -385,10 +386,11 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                   e.preventDefault();
                   return;
                 }
-                dragSourceRef.current = { pos: blockPos, dom: activeDomNode };
+                const sourceDom = activeDomNode;
+                dragSourceRef.current = { pos: blockPos, dom: sourceDom };
                 if (typeof window !== 'undefined') {
                   (window as any).__feedmobDraggedBlockPos = blockPos;
-                  (window as any).__feedmobDraggedDom = activeDomNode;
+                  (window as any).__feedmobDraggedDom = sourceDom;
                 }
                 setIsDragging(true);
 
@@ -397,14 +399,52 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 } catch {}
                 e.dataTransfer.effectAllowed = 'move';
 
+                // 1. Create a pristine Notion-style floating drag snapshot
+                const isDark = document.documentElement.classList.contains('dark');
+                const dragGhost = document.createElement('div');
+                dragGhost.className = 'feedmob-drag-ghost-preview';
+                dragGhost.style.position = 'fixed';
+                dragGhost.style.top = '-9999px';
+                dragGhost.style.left = '-9999px';
+                dragGhost.style.width = `${Math.min(Math.max(sourceDom.offsetWidth, 160), 380)}px`;
+                dragGhost.style.maxWidth = '380px';
+                dragGhost.style.padding = '8px 14px';
+                dragGhost.style.borderRadius = '10px';
+                dragGhost.style.backgroundColor = isDark ? '#1e293b' : '#ffffff';
+                dragGhost.style.color = isDark ? '#f1f5f9' : '#0f172a';
+                dragGhost.style.boxShadow = '0 12px 32px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.08)';
+                dragGhost.style.border = isDark ? '1px solid #334155' : '1px solid #e2e8f0';
+                dragGhost.style.opacity = '0.92';
+                dragGhost.style.pointerEvents = 'none';
+                dragGhost.style.zIndex = '999999';
+                dragGhost.style.overflow = 'hidden';
+                dragGhost.style.textOverflow = 'ellipsis';
+                dragGhost.style.whiteSpace = 'nowrap';
+                dragGhost.style.fontSize = '14px';
+                dragGhost.style.lineHeight = '1.5';
+                dragGhost.style.fontFamily = 'inherit';
+
+                const textContent = sourceDom.innerText?.trim() || sourceDom.textContent?.trim() || 'Block 内容';
+                dragGhost.innerText = textContent;
+
+                document.body.appendChild(dragGhost);
+
                 try {
-                  e.dataTransfer.setDragImage(activeDomNode, 0, 16);
+                  e.dataTransfer.setDragImage(dragGhost, 16, 16);
                 } catch {}
 
-                // Notion-style dimming and grayscale effect on source block
-                activeDomNode.style.opacity = '0.35';
-                activeDomNode.style.filter = 'grayscale(60%)';
-                activeDomNode.style.transition = 'opacity 0.15s ease, filter 0.15s ease';
+                setTimeout(() => {
+                  if (dragGhost.parentNode) {
+                    dragGhost.parentNode.removeChild(dragGhost);
+                  }
+                }, 0);
+
+                // 2. Notion-style dimming and grayscale effect on source block in document
+                requestAnimationFrame(() => {
+                  if (sourceDom) {
+                    sourceDom.classList.add('feedmob-drag-source-active');
+                  }
+                });
               }}
               onDragEnd={() => {
                 if (typeof window !== 'undefined') {
@@ -412,11 +452,15 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                   (window as any).__feedmobDraggedDom = null;
                 }
                 const source = dragSourceRef.current;
-                if (source) {
+                if (source && source.dom) {
+                  source.dom.classList.remove('feedmob-drag-source-active');
                   source.dom.style.opacity = '';
                   source.dom.style.filter = '';
                   source.dom.style.transition = '';
                 }
+                document.querySelectorAll('.feedmob-drag-source-active').forEach((el) => {
+                  el.classList.remove('feedmob-drag-source-active');
+                });
                 dragSourceRef.current = null;
                 setIsDragging(false);
                 setDropIndicator(null);

@@ -179,3 +179,16 @@ body {
   color: #1e40af;
 }
 
+/* Notion-style Dimmed Ghost State for Dragged Source Block */
+.feedmob-drag-source-active,
+.tiptap .feedmob-drag-source-active,
+.tiptap * .feedmob-drag-source-active {
+  opacity: 0.32 !important;
+  color: #94a3b8 !important;
+  filter: grayscale(85%) !important;
+  transition: opacity 0.15s ease, filter 0.15s ease !important;
+  user-select: none !important;
+  pointer-events: none !important;
+}
+
+

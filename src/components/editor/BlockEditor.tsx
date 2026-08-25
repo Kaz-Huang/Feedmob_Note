@@ -201,6 +201,11 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         }
 
         event.preventDefault();
+        if (typeof document !== 'undefined') {
+          document.querySelectorAll('.feedmob-drag-source-active').forEach((el) => {
+            el.classList.remove('feedmob-drag-source-active');
+          });
+        }
         const dropTarget = computeBlockDropTarget(view, event.clientX, event.clientY);
         if (dropTarget !== null) {
           moveBlockToDropTarget(editor, sourcePos, dropTarget);
