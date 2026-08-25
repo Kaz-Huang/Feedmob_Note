@@ -8,7 +8,6 @@ import {
   Activity,
   Calendar,
   Hash,
-  Shield,
   PanelLeftClose,
 } from 'lucide-react';
 import { useCurrentUser } from '@/lib/user-context';
@@ -116,16 +115,6 @@ export const Sidebar: React.FC = () => {
         )}
       </div>
 
-      {/* Footer Info Card */}
-      <div className="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50">
-        <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-xs mb-1">
-          <Shield className="w-3.5 h-3.5" />
-          <span>Notion 蒸馏内核</span>
-        </div>
-        <p className="text-xs text-emerald-700/90 dark:text-emerald-400/90 leading-relaxed font-medium">
-          极速 Block 键盘流 + 零拷贝时序投影。内网本地私有化，100% 数据主权。
-        </p>
-      </div>
     </aside>
   );
 };
