@@ -334,18 +334,43 @@ export function computeBlockDropTarget(
     indWidth = rect.width;
     indHeight = 3.5;
     isVertical = false;
-  } else if (zone === 'left') {
-    indTop = rect.top;
-    indLeft = rect.left - 2;
-    indWidth = 3.5;
-    indHeight = Math.max(24, rect.height);
+  } else if (zone === 'left' || zone === 'right') {
     isVertical = true;
-  } else if (zone === 'right') {
-    indTop = rect.top;
-    indLeft = rect.right - 1.5;
     indWidth = 3.5;
-    indHeight = Math.max(24, rect.height);
-    isVertical = true;
+
+    // Check if the target block is already part of a multi-column row
+    const columnListEl = blockEl.closest('[data-type="column-list"]') as HTMLElement | null;
+
+    if (columnListEl && editorDom.contains(columnListEl)) {
+      // Case A: Inside existing ColumnList (N columns -> N + 1 columns)
+      const rowRect = columnListEl.getBoundingClientRect();
+      const allColEls = Array.from(columnListEl.children).filter(
+        (el) => el.getAttribute('data-type') === 'column'
+      ) as HTMLElement[];
+      const currentNumCols = Math.max(1, allColEls.length);
+      const nextNumCols = currentNumCols + 1;
+      const colWidth = rowRect.width / nextNumCols;
+
+      const currentColEl = blockEl.closest('[data-type="column"]') as HTMLElement | null;
+      const currentColIndex = currentColEl ? Math.max(0, allColEls.indexOf(currentColEl)) : 0;
+
+      let dividerX: number;
+      if (zone === 'left') {
+        dividerX = rowRect.left + (currentColIndex === 0 ? colWidth : currentColIndex * colWidth);
+      } else {
+        dividerX = rowRect.left + (currentColIndex + 1) * colWidth;
+      }
+
+      indTop = rowRect.top;
+      indLeft = dividerX - 1.75;
+      indHeight = Math.max(24, blockEl.getBoundingClientRect().height, rowRect.height);
+    } else {
+      // Case B: Standalone single block row (1 column -> 2 columns, 50%/50%)
+      // Both left and right drag indicate a 50% split in the center of the row!
+      indTop = rect.top;
+      indLeft = rect.left + rect.width * 0.5 - 1.75;
+      indHeight = Math.max(24, rect.height);
+    }
   }
 
   return {
@@ -415,7 +440,7 @@ export function moveBlockToDropTarget(
   }
 
   if (zone === 'left' || zone === 'right') {
-    // 2. Side-by-Side Column Creation / Wrapping
+    // 2. Side-by-Side Column Creation / Dynamic Multi-column Insertion
     const columnType = schema.nodes.column;
     const columnListType = schema.nodes.columnList;
 
@@ -429,39 +454,60 @@ export function moveBlockToDropTarget(
       return columnType.create(null, [node]);
     };
 
-    let newColumnList: ProseMirrorNode;
+    const $targetPos = doc.resolve(targetPos);
+    let parentColListPos: number | null = null;
+    let parentColListNode: ProseMirrorNode | null = null;
+    let targetColIndex = -1;
 
-    if (targetNode.type === columnListType) {
-      // Target is already a ColumnList: append a new column on left or right
-      const existingCols: ProseMirrorNode[] = [];
-      targetNode.forEach((col) => existingCols.push(col));
-
-      const newCol = createCol(sourceNode);
-      const cols = zone === 'left' ? [newCol, ...existingCols] : [...existingCols, newCol];
-      newColumnList = columnListType.create({ columns: cols.length }, cols);
-    } else {
-      // Target is regular block: create a 2-column list
-      const col1 = createCol(zone === 'left' ? sourceNode : targetNode);
-      const col2 = createCol(zone === 'left' ? targetNode : sourceNode);
-      newColumnList = columnListType.create({ columns: 2 }, [col1, col2]);
+    for (let d = $targetPos.depth; d >= 1; d--) {
+      if ($targetPos.node(d).type === columnListType) {
+        parentColListPos = $targetPos.before(d);
+        parentColListNode = $targetPos.node(d);
+        if (d + 1 <= $targetPos.depth && $targetPos.node(d + 1).type === columnType) {
+          targetColIndex = $targetPos.index(d);
+        }
+        break;
+      }
     }
 
-    if (sourcePos < targetPos) {
-      // 1. Delete source first
-      const sourceSize = sourceNode.nodeSize;
-      tr.delete(sourcePos, sourcePos + sourceSize);
-      // 2. Map targetPos after deletion
-      const mappedTargetPos = tr.mapping.map(targetPos);
-      const targetSize = targetNode.nodeSize;
-      tr.replaceWith(mappedTargetPos, mappedTargetPos + targetSize, newColumnList);
+    if (parentColListNode !== null && parentColListPos !== null) {
+      // Target is inside an existing ColumnList: insert a new column into it
+      const existingCols: ProseMirrorNode[] = [];
+      parentColListNode.forEach((c) => existingCols.push(c));
+
+      const newCol = createCol(sourceNode);
+      const insertIndex =
+        zone === 'left'
+          ? Math.max(0, targetColIndex)
+          : Math.min(existingCols.length, targetColIndex + 1);
+      existingCols.splice(insertIndex, 0, newCol);
+
+      const newColumnList = columnListType.create({ columns: existingCols.length }, existingCols);
+
+      if (sourcePos < parentColListPos) {
+        tr.delete(sourcePos, sourcePos + sourceNode.nodeSize);
+        const mappedColListPos = tr.mapping.map(parentColListPos);
+        tr.replaceWith(mappedColListPos, mappedColListPos + parentColListNode.nodeSize, newColumnList);
+      } else {
+        tr.replaceWith(parentColListPos, parentColListPos + parentColListNode.nodeSize, newColumnList);
+        const mappedSourcePos = tr.mapping.map(sourcePos);
+        tr.delete(mappedSourcePos, mappedSourcePos + sourceNode.nodeSize);
+      }
     } else {
-      // 1. Replace target first
-      const targetSize = targetNode.nodeSize;
-      tr.replaceWith(targetPos, targetPos + targetSize, newColumnList);
-      // 2. Map sourcePos after replacement
-      const mappedSourcePos = tr.mapping.map(sourcePos);
-      const sourceSize = sourceNode.nodeSize;
-      tr.delete(mappedSourcePos, mappedSourcePos + sourceSize);
+      // Target is a regular standalone block: create a 2-column list (50% / 50%)
+      const col1 = createCol(zone === 'left' ? sourceNode : targetNode);
+      const col2 = createCol(zone === 'left' ? targetNode : sourceNode);
+      const newColumnList = columnListType.create({ columns: 2 }, [col1, col2]);
+
+      if (sourcePos < targetPos) {
+        tr.delete(sourcePos, sourcePos + sourceNode.nodeSize);
+        const mappedTargetPos = tr.mapping.map(targetPos);
+        tr.replaceWith(mappedTargetPos, mappedTargetPos + targetNode.nodeSize, newColumnList);
+      } else {
+        tr.replaceWith(targetPos, targetPos + targetNode.nodeSize, newColumnList);
+        const mappedSourcePos = tr.mapping.map(sourcePos);
+        tr.delete(mappedSourcePos, mappedSourcePos + sourceNode.nodeSize);
+      }
     }
 
     view.dispatch(tr);
