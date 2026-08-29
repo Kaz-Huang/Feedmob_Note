@@ -14,10 +14,12 @@ import {
   Rows,
 } from 'lucide-react';
 import {
-  moveBlock,
-  duplicateBlock,
-  deleteBlock,
-  getTopLevelBlockRange,
+  moveBlockAtPos,
+  duplicateBlockAtPos,
+  deleteBlockAtPos,
+  insertParagraphNear,
+  turnBlockIntoColumns,
+  resolveDomBlockPos,
   computeBlockDropTarget,
   getEnclosingColumnList,
   unwrapColumnList,
@@ -57,23 +59,11 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
   } | null>(null);
 
   // Resolve the block position of the currently hovered DOM node.
+  // Handles every block kind uniformly (text blocks, atoms like mermaid,
+  // whole column rows when hovering the gap between columns).
   const getActiveBlockPos = (): number | null => {
-    if (!activeDomNode || !editor) return null;
-    try {
-      const pos = editor.view.posAtDOM(activeDomNode, 0);
-      if (pos < 0) return null;
-      const $pos = editor.state.doc.resolve(pos);
-      // Prefer innermost block (e.g. inside column)
-      for (let d = $pos.depth; d >= 1; d--) {
-        const n = $pos.node(d);
-        if (n.isBlock && n.type.name !== 'column' && n.type.name !== 'columnList') {
-          return $pos.before(d);
-        }
-      }
-      return $pos.depth >= 1 ? $pos.before(1) : null;
-    } catch {
-      return null;
-    }
+    if (!activeDomNode || !editor?.view) return null;
+    return resolveDomBlockPos(editor.view, activeDomNode);
   };
 
   // Track Alt key press for Notion tooltip toggle
@@ -115,6 +105,12 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
 
       const element = document.elementFromPoint(e.clientX, e.clientY);
       if (!element || !editorDom.contains(element)) {
+        // Mouse left the editor blocks (title, padding…): hide the handle
+        // instead of leaving it parked next to the last hovered block.
+        if (activeDomNode !== null) {
+          setActiveDomNode(null);
+          setHandleTop(null);
+        }
         return;
       }
 
@@ -159,8 +155,18 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       }
     };
 
+    const handleMouseLeave = () => {
+      if (isMenuOpen || isDragging) return;
+      setActiveDomNode(null);
+      setHandleTop(null);
+    };
+
     container.addEventListener('mousemove', handleMouseMove);
-    return () => container.removeEventListener('mousemove', handleMouseMove);
+    container.addEventListener('mouseleave', handleMouseLeave);
+    return () => {
+      container.removeEventListener('mousemove', handleMouseMove);
+      container.removeEventListener('mouseleave', handleMouseLeave);
+    };
   }, [editor, editorContainerRef, isMenuOpen, isDragging, activeDomNode]);
 
   // Notion-style blue drop indicator while dragging a block over the editor.
@@ -180,7 +186,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
 
       const view = editor.view;
-      const dropTarget = computeBlockDropTarget(view, e.clientX, e.clientY);
+      // Column (side) drops are explicit: only while ⇧ is held.
+      const dropTarget = computeBlockDropTarget(view, e.clientX, e.clientY, {
+        allowSides: e.shiftKey,
+      });
 
       const editorDom = container.querySelector('.tiptap') as HTMLElement | null;
       if (!dropTarget || !editorDom) {
@@ -217,10 +226,23 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     };
 
     const handleDrop = (e: DragEvent) => {
+      // Full cleanup MUST happen here: resetting handleTop below unmounts the
+      // draggable button, so a later `dragend` may never fire. Leaving the
+      // drag state stuck would freeze the handle (it only re-appears on
+      // mousemove while !isDragging) and leak __feedmobDraggedBlockPos.
+      if (typeof window !== 'undefined') {
+        (window as any).__feedmobDraggedBlockPos = null;
+      }
       document.querySelectorAll('.feedmob-drag-source-active').forEach((el) => {
         el.classList.remove('feedmob-drag-source-active');
       });
+      dragSourceRef.current = null;
+      setIsDragging(false);
       setDropIndicator(null);
+      // The doc just changed under the pointer — the cached hover block is
+      // stale, so recompute the handle position from the next mousemove.
+      setActiveDomNode(null);
+      setHandleTop(null);
     };
 
     window.addEventListener('dragover', handleDragOver, { passive: false });
@@ -255,88 +277,61 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
   if (!editor) return null;
 
   const focusBlock = () => {
-    if (activeDomNode && editor.view) {
-      try {
-        const pos = editor.view.posAtDOM(activeDomNode, 0);
-        if (pos >= 0) {
-          editor.commands.focus(pos + 1);
-        }
-      } catch (e) {
-        console.error(e);
+    if (!activeDomNode || !editor?.view) return;
+    const pos = resolveDomBlockPos(editor.view, activeDomNode);
+    if (pos === null) return;
+    const node = editor.state.doc.nodeAt(pos);
+    if (!node) return;
+    try {
+      if (node.isAtom || node.isLeaf) {
+        // Atom blocks have no inner text position — keep the current caret
+        // instead of letting it escape into a neighbouring block.
+        editor.commands.focus();
+      } else {
+        editor.commands.focus(pos + 1);
       }
+    } catch (e) {
+      console.error(e);
     }
   };
 
   const handlePlusClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    focusBlock();
-    const block = getTopLevelBlockRange(editor);
-    if (!block) return;
-
-    if (e.altKey) {
-      // Insert above
-      editor.chain().focus().insertContentAt(block.pos, { type: 'paragraph' }).run();
-      const safePos = Math.min(block.pos + 1, editor.state.doc.content.size);
-      editor.commands.focus(safePos);
-    } else {
-      // Insert below
-      const insertPos = block.pos + block.nodeSize;
-      editor.chain().focus().insertContentAt(insertPos, { type: 'paragraph' }).run();
-      const safePos = Math.min(insertPos + 1, editor.state.doc.content.size);
-      editor.commands.focus(safePos);
-    }
+    const pos = getActiveBlockPos();
+    if (pos === null) return;
+    insertParagraphNear(editor, pos, e.altKey ? 'above' : 'below');
   };
 
   const handleTurnIntoColumns = () => {
-    focusBlock();
-    const block = getTopLevelBlockRange(editor);
-    if (!block) return;
-
-    // Wrap current block into a 2-column layout
-    const currentJSON = block.node.toJSON();
-    editor.commands.insertContentAt(
-      { from: block.pos, to: block.pos + block.nodeSize },
-      {
-        type: 'columnList',
-        attrs: { columns: 2 },
-        content: [
-          {
-            type: 'column',
-            content: [currentJSON],
-          },
-          {
-            type: 'column',
-            content: [{ type: 'paragraph', content: [{ type: 'text', text: '👉 并排右栏内容...' }] }],
-          },
-        ],
-      }
-    );
-
+    const pos = getActiveBlockPos();
+    if (pos === null) return;
+    turnBlockIntoColumns(editor, pos);
     setIsMenuOpen(false);
   };
 
   const handleMoveUp = () => {
-    focusBlock();
-    moveBlock(editor, 'up');
+    const pos = getActiveBlockPos();
+    if (pos !== null) moveBlockAtPos(editor, pos, 'up');
     setIsMenuOpen(false);
   };
 
   const handleMoveDown = () => {
-    focusBlock();
-    moveBlock(editor, 'down');
+    const pos = getActiveBlockPos();
+    if (pos !== null) moveBlockAtPos(editor, pos, 'down');
     setIsMenuOpen(false);
   };
 
   const handleDuplicate = () => {
-    focusBlock();
-    duplicateBlock(editor);
+    const pos = getActiveBlockPos();
+    if (pos !== null) duplicateBlockAtPos(editor, pos);
     setIsMenuOpen(false);
   };
 
   const handleDelete = () => {
-    focusBlock();
-    deleteBlock(editor);
+    const pos = getActiveBlockPos();
+    if (pos !== null) deleteBlockAtPos(editor, pos);
     setIsMenuOpen(false);
+    setActiveDomNode(null);
     setHandleTop(null);
   };
 
@@ -346,6 +341,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       {handleTop !== null && (
         <div
           ref={handleRef}
+          data-block-handle="true"
           style={{
             top: `${handleTop}px`,
             left: `${handleLeft}px`,
@@ -390,7 +386,6 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 dragSourceRef.current = { pos: blockPos, dom: sourceDom };
                 if (typeof window !== 'undefined') {
                   (window as any).__feedmobDraggedBlockPos = blockPos;
-                  (window as any).__feedmobDraggedDom = sourceDom;
                 }
                 setIsDragging(true);
 
@@ -449,7 +444,6 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
               onDragEnd={() => {
                 if (typeof window !== 'undefined') {
                   (window as any).__feedmobDraggedBlockPos = null;
-                  (window as any).__feedmobDraggedDom = null;
                 }
                 const source = dragSourceRef.current;
                 if (source && source.dom) {
@@ -464,6 +458,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 dragSourceRef.current = null;
                 setIsDragging(false);
                 setDropIndicator(null);
+                // Doc may have changed on drop — drop the stale hover block
+                // and let the next mousemove re-anchor the handle.
+                setActiveDomNode(null);
+                setHandleTop(null);
               }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -485,7 +483,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
             {/* Notion-style Dark Tooltip for Grip */}
             {hoveredButton === 'grip' && !isMenuOpen && (
               <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 z-50 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap shadow-xl pointer-events-none animate-in fade-in zoom-in-95">
-                拖动以移动 / 单击打开菜单
+                拖动移动 · ⇧+拖动并排分栏 / 单击打开菜单
                 <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-900" />
               </div>
             )}

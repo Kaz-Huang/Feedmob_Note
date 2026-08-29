@@ -129,43 +129,11 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         },
       ],
     },
-    onUpdate: ({ editor: ed }) => {
-      // Check slash query on content update
-      if (isSlashOpen && slashTriggerPos !== null) {
-        const { from } = ed.state.selection;
-        if (from < slashTriggerPos) {
-          setIsSlashOpen(false);
-          setSlashTriggerPos(null);
-          return;
-        }
-
-        try {
-          const text = ed.state.doc.textBetween(slashTriggerPos, from, '\n', '\n');
-          if (!text.startsWith('/')) {
-            setIsSlashOpen(false);
-            setSlashTriggerPos(null);
-          } else if (text.includes(' ') || text.includes('\n')) {
-            setIsSlashOpen(false);
-            setSlashTriggerPos(null);
-          } else {
-            setSlashQuery(text.slice(1));
-          }
-        } catch {
-          setIsSlashOpen(false);
-          setSlashTriggerPos(null);
-        }
-      }
-    },
-    onSelectionUpdate: ({ editor: ed }) => {
-      // If user clicks elsewhere or moves cursor far away, close slash menu
-      if (isSlashOpen && slashTriggerPos !== null) {
-        const { from } = ed.state.selection;
-        if (from < slashTriggerPos || from > slashTriggerPos + 30) {
-          setIsSlashOpen(false);
-          setSlashTriggerPos(null);
-        }
-      }
-    },
+    // NOTE: slash-menu state tracking lives in `editorProps` below.
+    // In tiptap v2, `onUpdate`/`onSelectionUpdate` callbacks are registered
+    // once at editor creation and never re-wired, so closures over React
+    // state go stale there. `editorProps` handlers ARE refreshed on every
+    // render (setOptions → view.setProps), which keeps the menu logic live.
     editorProps: {
       handleDOMEvents: {
         dragover: (view, event) => {
@@ -206,7 +174,12 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
             el.classList.remove('feedmob-drag-source-active');
           });
         }
-        const dropTarget = computeBlockDropTarget(view, event.clientX, event.clientY);
+        // Column (side) drops are explicit: only while ⇧ is held, otherwise a
+        // plain vertical drag near the left edge would accidentally wrap two
+        // rows into a side-by-side layout.
+        const dropTarget = computeBlockDropTarget(view, event.clientX, event.clientY, {
+          allowSides: event.shiftKey,
+        });
         if (dropTarget !== null) {
           moveBlockToDropTarget(editor, sourcePos, dropTarget);
         }
@@ -256,14 +229,61 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           return true;
         }
 
-        // Handle '/' trigger for slash menu
-        if (event.key === '/') {
+        // Handle '/' trigger for slash menu — only at the start of a line or
+        // right after whitespace, so URLs (https://…) don't pop the menu.
+        if (event.key === '/' && !editor?.isActive('codeBlock')) {
+          const { $from } = view.state.selection;
+          const charBefore =
+            $from.parentOffset > 0
+              ? $from.parent.textBetween(
+                  $from.parentOffset - 1,
+                  $from.parentOffset,
+                  '\n',
+                  '\n'
+                )
+              : '';
+          if ($from.parentOffset === 0 || /\s/.test(charBefore)) {
+            try {
+              const coords = view.coordsAtPos($from.pos);
+              setSlashPos({ x: coords.left, y: coords.bottom + 8 });
+              setSlashTriggerPos($from.pos);
+              setSlashQuery('');
+              setIsSlashOpen(true);
+            } catch {}
+          }
+        }
+
+        // Track slash query while deleting (Backspace over the '/' closes it)
+        if (
+          event.key === 'Backspace' &&
+          isSlashOpen &&
+          slashTriggerPos !== null
+        ) {
           const { from } = view.state.selection;
-          const coords = view.coordsAtPos(from);
-          setSlashPos({ x: coords.left, y: coords.bottom + 8 });
-          setSlashTriggerPos(from);
-          setSlashQuery('');
-          setIsSlashOpen(true);
+          if (from - 1 <= slashTriggerPos) {
+            setIsSlashOpen(false);
+            setSlashTriggerPos(null);
+          } else {
+            try {
+              const text = view.state.doc.textBetween(slashTriggerPos, from - 1, '\n', '\n');
+              if (!text.startsWith('/') || text.includes(' ') || text.includes('\n')) {
+                setIsSlashOpen(false);
+                setSlashTriggerPos(null);
+              } else {
+                setSlashQuery(text.slice(1));
+              }
+            } catch {
+              setIsSlashOpen(false);
+              setSlashTriggerPos(null);
+            }
+          }
+        }
+        if (event.key === 'Delete' && isSlashOpen && slashTriggerPos !== null) {
+          const { from } = view.state.selection;
+          if (from <= slashTriggerPos) {
+            setIsSlashOpen(false);
+            setSlashTriggerPos(null);
+          }
         }
 
         // Handle Escape to close slash menu
@@ -281,25 +301,62 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
 
         return false;
       },
+      // Live slash-query tracking. handleTextInput (unlike onUpdate) is an
+      // editorProps handler, so its closure stays in sync with React state.
+      handleTextInput: (view, from, _to, text) => {
+        if (!isSlashOpen || slashTriggerPos === null) return false;
+        if (from < slashTriggerPos) {
+          setIsSlashOpen(false);
+          setSlashTriggerPos(null);
+          return false;
+        }
+        try {
+          const existing = view.state.doc.textBetween(slashTriggerPos, from, '\n', '\n');
+          const full = existing + text;
+          if (!full.startsWith('/') || full.includes(' ') || full.includes('\n')) {
+            setIsSlashOpen(false);
+            setSlashTriggerPos(null);
+          } else {
+            setSlashQuery(full.slice(1));
+          }
+        } catch {
+          setIsSlashOpen(false);
+          setSlashTriggerPos(null);
+        }
+        return false;
+      },
     },
   });
 
-  // Keep editor content in sync if initialContent changes
+  // Keep editor content in sync if initialContent changes — but only when the
+  // content is genuinely different. After every save the parent re-sets
+  // initialContent to a new object with identical JSON; re-running setContent
+  // there would reset the caret and wipe keystrokes typed during the save
+  // round-trip.
+  const lastAppliedContentRef = useRef<string | null>(null);
   useEffect(() => {
-    if (editor && initialContent) {
-      try {
-        const content = typeof initialContent === 'string' ? JSON.parse(initialContent) : initialContent;
-        editor.commands.setContent(content);
-      } catch (e) {
-        console.error('Failed to parse editor initial content', e);
-      }
+    if (!editor || !initialContent) return;
+    try {
+      const content = typeof initialContent === 'string' ? JSON.parse(initialContent) : initialContent;
+      const serialized = JSON.stringify(content);
+      if (serialized === lastAppliedContentRef.current) return;
+      lastAppliedContentRef.current = serialized;
+      editor.commands.setContent(content);
+    } catch (e) {
+      console.error('Failed to parse editor initial content', e);
     }
   }, [initialContent, editor]);
 
   useEffect(() => {
-    setTitle(initialTitle);
-    setTags(initialTags);
-    setMood(initialMood);
+    // Value-compare before syncing so an unchanged snapshot (e.g. right after
+    // a save) never clobbers newer local edits.
+    setTitle((prev) => (prev === initialTitle ? prev : initialTitle));
+    setMood((prev) => (prev === initialMood ? prev : initialMood));
+    setTags((prev) =>
+      prev.length === initialTags.length && prev.every((t, i) => t === initialTags[i])
+        ? prev
+        : initialTags
+    );
   }, [initialTitle, initialTags, initialMood]);
 
   const handleManualSave = async () => {
@@ -487,6 +544,12 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           if (target.closest('input, button, select, textarea, [data-bubble-menu="true"]')) {
             return;
           }
+          // Clicks inside the editor itself (or on the floating block handle)
+          // are ProseMirror's business — intercepting them here used to force
+          // the caret to the document end on every click.
+          if (target.closest('.tiptap') || target.closest('[data-block-handle]')) {
+            return;
+          }
 
           // If clicking anywhere in the spacious canvas or bottom buffer:
           const { doc } = editor.state;
@@ -595,7 +658,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-600 dark:text-slate-300">📅 日期：{date}</span>
             <span>•</span>
-            <span>💡 提示：输入 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">/</code> 唤起组件，悬浮左侧 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">⠿</code> 拖动或按 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">Alt + ↑/↓</code> 移动 Block</span>
+            <span>💡 提示：输入 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">/</code> 唤起组件，悬浮左侧 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">⠿</code> 拖动移动（<code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">⇧+拖动</code> 并排分栏），或按 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">Alt + ↑/↓</code> 移动 Block</span>
           </div>
           {lastSavedTime && (
             <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold shrink-0">

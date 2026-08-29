@@ -192,3 +192,16 @@ body {
 }
 
 
+
+/* Empty column placeholder: a column holding only empty paragraphs would be
+   invisible blank space — show a dashed outline so degenerate column rows
+   are discoverable. */
+.tiptap [data-type='column'].column-empty {
+  outline: 1.5px dashed rgba(148, 163, 184, 0.55);
+  outline-offset: 3px;
+  border-radius: 8px;
+  min-height: 32px;
+}
+.dark .tiptap [data-type='column'].column-empty {
+  outline-color: rgba(71, 85, 105, 0.65);
+}

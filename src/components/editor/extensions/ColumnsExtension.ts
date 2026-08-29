@@ -105,12 +105,25 @@ export const Column = Node.create({
     ];
   },
 
-  renderHTML({ HTMLAttributes }) {
+  renderHTML({ node, HTMLAttributes }) {
+    // A column holding only empty paragraphs renders as invisible blank
+    // space. Give it a dashed outline so degenerate rows (e.g. legacy docs
+    // where a drag once created a block | empty side-by-side row) are
+    // discoverable and can be cleaned up manually.
+    let onlyEmptyParagraphs = node.childCount > 0;
+    node.forEach((child) => {
+      if (child.type.name !== 'paragraph' || child.content.size > 0) {
+        onlyEmptyParagraphs = false;
+      }
+    });
+
     return [
       'div',
       mergeAttributes(HTMLAttributes, {
         'data-type': 'column',
-        class: 'column-block flex-1 min-w-0',
+        class: onlyEmptyParagraphs
+          ? 'column-block column-empty flex-1 min-w-0'
+          : 'column-block flex-1 min-w-0',
       }),
       0,
     ];
