@@ -1,9 +1,10 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import type { NodeViewProps } from '@tiptap/react';
 import React, { useEffect, useRef, useState } from 'react';
 import { Code2, Eye, GitGraph } from 'lucide-react';
 
-const MermaidComponent = ({ node, updateAttributes }: any) => {
+const MermaidComponent = ({ node, updateAttributes }: NodeViewProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [code, setCode] = useState(
     node.attrs.code ||
@@ -12,6 +13,8 @@ const MermaidComponent = ({ node, updateAttributes }: any) => {
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setCode(node.attrs.code ?? ''); }, [node.attrs.code]);
 
   useEffect(() => {
     let isMounted = true;
@@ -25,7 +28,8 @@ const MermaidComponent = ({ node, updateAttributes }: any) => {
         mermaidModule.initialize({
           startOnLoad: false,
           theme: 'neutral',
-          securityLevel: 'loose',
+          securityLevel: 'strict',
+          suppressErrorRendering: true,
         });
 
         const uniqueId = `mermaid-${Math.random().toString(36).substring(2, 9)}`;
@@ -55,7 +59,7 @@ const MermaidComponent = ({ node, updateAttributes }: any) => {
   };
 
   return (
-    <NodeViewWrapper className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900 shadow-xs">
+    <NodeViewWrapper contentEditable={false} className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900 shadow-xs">
       {/* Header bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
         <div className="flex items-center gap-2 font-semibold">
@@ -141,4 +145,3 @@ export const MermaidNode = Node.create({
     return ReactNodeViewRenderer(MermaidComponent);
   },
 });
-

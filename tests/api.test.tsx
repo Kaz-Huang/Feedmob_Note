@@ -1,0 +1,48 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { PrismaClient } from '@prisma/client';
+
+test('API saves tags atomically, deduplicates names and rolls back a failed association', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'feedmob-block-test-'));
+  const client = new PrismaClient({ datasourceUrl: 'file:' + join(directory, 'test.db').replaceAll('\\', '/') });
+  let failAssociation = false;
+  const isolated = client.$extends({ query: { tagOnLog: { async create({ args, query }) {
+    if (failAssociation) throw new Error('Simulated tag failure');
+    return query(args);
+  } } } });
+  // The route imports this isolated client. Never connects to prisma/dev.db.
+  (globalThis as any).prisma = isolated;
+  try {
+    const sql = execFileSync(process.execPath, [resolve('node_modules/prisma/build/index.js'), 'migrate', 'diff', '--from-empty', '--to-schema-datamodel', 'prisma/schema.prisma', '--script'], { encoding: 'utf8' });
+    for (const statement of sql.split(';').map(value => value.trim()).filter(Boolean)) await client.$executeRawUnsafe(statement);
+    await client.user.create({ data: { id: 'test-user', email: 'test@example.invalid', name: 'Test' } });
+    const { POST } = await import('../src/app/api/logs/route');
+    const request = (data: any) => new Request('http://localhost/api/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: 'test-user', date: '2099-01-01', contentJson: { type: 'doc', content: [{ type: 'paragraph' }] }, ...data }) });
+    const first = await POST(request({ title: 'original', tagNames: ['project', ' project ', '#project', ' ', 123] }));
+    assert.equal(first.status, 200);
+    assert.equal((await first.json()).tags.length, 1);
+    failAssociation = true;
+    const originalError = console.error;
+    let failed;
+    try {
+      console.error = () => {};
+      failed = await POST(request({ title: 'must rollback', tagNames: ['new-tag'] }));
+    } finally { console.error = originalError; }
+    assert.equal(failed.status, 500);
+    const stored = await client.workLog.findFirst({ include: { tags: { include: { tag: true } } } });
+    assert.equal(stored?.title, 'original');
+    assert.deepEqual(stored?.tags.map(value => value.tag.name), ['project']);
+    assert.equal(await client.tag.count({ where: { name: 'new-tag' } }), 0);
+    const invalid = await POST(request({ contentJson: '{invalid json' }));
+    assert.equal(invalid.status, 400);
+  } finally {
+    await client.$disconnect();
+    delete (globalThis as any).prisma;
+    assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

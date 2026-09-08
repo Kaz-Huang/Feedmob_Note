@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { startBlockDrag, getDraggedBlockPos, endBlockDrag } from './utils/block-drag';
+import { BLOCK_TYPES, canConvertBlock, convertBlock, type BlockType } from './utils/block-conversion';
 import { Editor } from '@tiptap/react';
 import {
   GripVertical,
@@ -107,9 +109,8 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       if (!element || !editorDom.contains(element)) {
         // Mouse left the editor blocks (title, padding…): hide the handle
         // instead of leaving it parked next to the last hovered block.
-        if (activeDomNode !== null) {
-          setActiveDomNode(null);
-          setHandleTop(null);
+        if (activeDomNode && !hideTimeoutRef.current) {
+          hideTimeoutRef.current = setTimeout(() => { setActiveDomNode(null); setHandleTop(null); hideTimeoutRef.current = null; }, 250);
         }
         return;
       }
@@ -130,7 +131,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
         }
       }
 
-      if (current && current !== activeDomNode) {
+      if (hideTimeoutRef.current) { clearTimeout(hideTimeoutRef.current); hideTimeoutRef.current = null; }
+      const listItem = element.closest('li');
+      if (listItem && editorDom.contains(listItem)) current = listItem;
+      if (current) {
         setActiveDomNode(current);
         const containerRect = container.getBoundingClientRect();
         const blockRect = current.getBoundingClientRect();
@@ -166,6 +170,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
       container.removeEventListener('mouseleave', handleMouseLeave);
+      if (hideTimeoutRef.current) { clearTimeout(hideTimeoutRef.current); hideTimeoutRef.current = null; }
     };
   }, [editor, editorContainerRef, isMenuOpen, isDragging, activeDomNode]);
 
@@ -174,11 +179,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     const container = editorContainerRef.current;
     if (!container || !editor) return;
 
-    const isBlockDrag = () =>
-      dragSourceRef.current !== null ||
-      (typeof window !== 'undefined' &&
-        (window as any).__feedmobDraggedBlockPos !== undefined &&
-        (window as any).__feedmobDraggedBlockPos !== null);
+    const isBlockDrag = () => getDraggedBlockPos(editor.view) !== null;
 
     const handleDragOver = (e: DragEvent) => {
       if (!isBlockDrag()) return;
@@ -186,10 +187,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
 
       const view = editor.view;
-      // Column (side) drops are explicit: only while ⇧ is held.
-      const dropTarget = computeBlockDropTarget(view, e.clientX, e.clientY, {
-        allowSides: e.shiftKey,
-      });
+      const sourcePos = getDraggedBlockPos(view);
+      const dropTarget = sourcePos === null
+        ? null
+        : computeBlockDropTarget(view, e.clientX, e.clientY, { sourcePos });
 
       const editorDom = container.querySelector('.tiptap') as HTMLElement | null;
       if (!dropTarget || !editorDom) {
@@ -230,9 +231,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       // draggable button, so a later `dragend` may never fire. Leaving the
       // drag state stuck would freeze the handle (it only re-appears on
       // mousemove while !isDragging) and leak __feedmobDraggedBlockPos.
-      if (typeof window !== 'undefined') {
-        (window as any).__feedmobDraggedBlockPos = null;
-      }
+      endBlockDrag(editor.view);
       document.querySelectorAll('.feedmob-drag-source-active').forEach((el) => {
         el.classList.remove('feedmob-drag-source-active');
       });
@@ -248,10 +247,13 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     window.addEventListener('dragover', handleDragOver, { passive: false });
     window.addEventListener('dragleave', handleDragLeave);
     window.addEventListener('drop', handleDrop);
+    window.addEventListener('dragend', handleDrop);
     return () => {
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
+      window.removeEventListener('dragend', handleDrop);
+      endBlockDrag(editor.view);
     };
   }, [editor, editorContainerRef]);
 
@@ -286,7 +288,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       if (node.isAtom || node.isLeaf) {
         // Atom blocks have no inner text position — keep the current caret
         // instead of letting it escape into a neighbouring block.
-        editor.commands.focus();
+        editor.chain().focus().setNodeSelection(pos).run();
       } else {
         editor.commands.focus(pos + 1);
       }
@@ -299,7 +301,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     e.stopPropagation();
     const pos = getActiveBlockPos();
     if (pos === null) return;
-    insertParagraphNear(editor, pos, e.altKey ? 'above' : 'below');
+    if (insertParagraphNear(editor, pos, e.altKey ? 'above' : 'below')) editor.commands.insertContent('/');
   };
 
   const handleTurnIntoColumns = () => {
@@ -353,6 +355,8 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
           <div className="relative">
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              aria-label="添加块"
               onClick={handlePlusClick}
               onMouseEnter={() => setHoveredButton('plus')}
               onMouseLeave={() => setHoveredButton(null)}
@@ -375,6 +379,8 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
           <div className="relative">
             <button
               type="button"
+              aria-label="块操作菜单"
+              aria-expanded={isMenuOpen}
               draggable
               onDragStart={(e) => {
                 const blockPos = getActiveBlockPos();
@@ -384,9 +390,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 }
                 const sourceDom = activeDomNode;
                 dragSourceRef.current = { pos: blockPos, dom: sourceDom };
-                if (typeof window !== 'undefined') {
-                  (window as any).__feedmobDraggedBlockPos = blockPos;
-                }
+                startBlockDrag(editor.view, blockPos);
                 setIsDragging(true);
 
                 try {
@@ -442,9 +446,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 });
               }}
               onDragEnd={() => {
-                if (typeof window !== 'undefined') {
-                  (window as any).__feedmobDraggedBlockPos = null;
-                }
+                endBlockDrag(editor.view);
                 const source = dragSourceRef.current;
                 if (source && source.dom) {
                   source.dom.classList.remove('feedmob-drag-source-active');
@@ -483,7 +485,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
             {/* Notion-style Dark Tooltip for Grip */}
             {hoveredButton === 'grip' && !isMenuOpen && (
               <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 z-50 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap shadow-xl pointer-events-none animate-in fade-in zoom-in-95">
-                拖动移动 · ⇧+拖动并排分栏 / 单击打开菜单
+                拖到上下方调整顺序 · 拖到左右侧并排分栏 · 单击打开菜单
                 <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-900" />
               </div>
             )}
@@ -493,11 +495,29 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
           {isMenuOpen && (
             <div
               ref={menuRef}
-              className="absolute left-16 top-0 w-60 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex flex-col gap-1 z-50 animate-in fade-in zoom-in-95 text-sm text-slate-700 dark:text-slate-300"
+              role="menu"
+              aria-label="块操作"
+              onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setIsMenuOpen(false); editor.commands.focus(); } }}
+              className="absolute left-0 sm:left-12 top-8 w-60 max-h-[60vh] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex flex-col gap-1 z-50 animate-in fade-in zoom-in-95 text-sm text-slate-700 dark:text-slate-300"
             >
               <div className="px-3 py-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider">
                 Block 块操作
               </div>
+
+              {getActiveBlockPos() !== null && canConvertBlock(editor, getActiveBlockPos()!) && (
+                <label className="px-3 py-2 flex items-center gap-2">
+                  <span className="shrink-0">转换为</span>
+                  <select aria-label="转换块类型" value="" className="w-full bg-transparent border rounded px-2 py-1"
+                    onChange={(event) => {
+                      const pos = getActiveBlockPos();
+                      if (pos !== null) convertBlock(editor, pos, event.target.value as BlockType);
+                      setIsMenuOpen(false);
+                    }}>
+                    <option value="" disabled>选择类型</option>
+                    {BLOCK_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+              )}
 
               <button
                 type="button"
@@ -579,7 +599,9 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
       {/* 2. Notion-style Pure Glowing Blue Drop Indicator Line (OUTSIDE the handle div, positioned relative to containerRef) */}
       {dropIndicator && (
         <div
-          className="absolute z-30 pointer-events-none rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.95)] transition-all duration-75"
+          data-testid="block-drop-indicator"
+          data-orientation={dropIndicator.isVertical ? 'vertical' : 'horizontal'}
+          className="absolute z-30 pointer-events-none rounded-full bg-[#2383E2] shadow-[0_0_6px_rgba(35,131,226,0.45)] transition-all duration-75"
           style={{
             top: `${dropIndicator.top}px`,
             left: `${dropIndicator.left}px`,

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useEditor, EditorContent, BubbleMenu } from '@tiptap/react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import { SelectionToolbar } from './SelectionToolbar';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -15,14 +16,17 @@ import { MermaidNode } from './extensions/MermaidNode';
 import { WhiteboardNode } from './extensions/WhiteboardNode';
 import { EmbedNode } from './extensions/EmbedNode';
 import { ColumnList, Column } from './extensions/ColumnsExtension';
-import { SlashCommandMenu, SLASH_ITEMS } from './SlashCommandMenu';
+import { SlashCommandMenu, LOG_TEMPLATE } from './SlashCommandMenu';
 import { BlockDragHandle } from './BlockDragHandle';
 import { moveBlock, duplicateBlock } from './utils/block-movement';
 import {
   computeBlockDropTarget,
   moveBlockToDropTarget,
-  BLOCK_DRAG_MIME,
 } from './utils/block-movement';
+import { SlashCommand } from './extensions/SlashCommand';
+import { getDraggedBlockPos } from './utils/block-drag';
+import { useSlashCommand } from './useSlashCommand';
+import { parseDocument, snapshotKey, type DocumentSnapshot } from './utils/document';
 import { useCurrentUser } from '@/lib/user-context';
 import {
   Bold,
@@ -33,11 +37,8 @@ import {
   Check,
   Save,
   Sparkles,
-  Smile,
-  AlertTriangle,
   Plus,
   X,
-  Keyboard,
   ArrowUpDown,
   Maximize2,
   Minimize2,
@@ -45,18 +46,13 @@ import {
 
 
 interface BlockEditorProps {
-  initialContent?: any;
+  initialContent?: unknown;
   initialTitle?: string;
   initialTags?: string[];
   initialMood?: string;
   date: string;
-  onSave: (data: {
-    title: string;
-    contentJson: any;
-    contentText: string;
-    tagNames: string[];
-    mood: string;
-  }) => Promise<void>;
+  documentId: string;
+  onSave: (data: DocumentSnapshot & { contentText: string }) => Promise<void>;
   isSaving?: boolean;
 }
 
@@ -68,24 +64,37 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
   initialTags = [],
   initialMood = '🚀',
   date,
+  documentId,
   onSave,
   isSaving = false,
 }) => {
-  const [title, setTitle] = useState(initialTitle);
-  const [tags, setTags] = useState<string[]>(initialTags);
+  const draftKey = 'feedmob-draft:' + documentId;
+  const [initialSnapshot] = useState<DocumentSnapshot>(() => {
+    const server = { title: initialTitle, contentJson: parseDocument(initialContent), tagNames: initialTags, mood: initialMood };
+    try {
+      const draft = JSON.parse(localStorage.getItem(draftKey) || 'null');
+      if (draft && typeof draft.title === 'string' && typeof draft.mood === 'string' && Array.isArray(draft.tagNames) && draft.tagNames.every((tag: unknown) => typeof tag === 'string')) {
+        return { ...draft, contentJson: parseDocument(draft.contentJson) };
+      }
+    } catch { /* Storage may be unavailable; editing still works. */ }
+    return server;
+  });
+  const [title, setTitle] = useState(initialSnapshot.title);
+  const [tags, setTags] = useState<string[]>(initialSnapshot.tagNames);
   const [newTagInput, setNewTagInput] = useState('');
   const [isAddingTag, setIsAddingTag] = useState(false);
-  const [mood, setMood] = useState(initialMood);
+  const [mood, setMood] = useState(initialSnapshot.mood);
   const [isMoodPickerOpen, setIsMoodPickerOpen] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Slash Command State
-  const [isSlashOpen, setIsSlashOpen] = useState(false);
-  const [slashPos, setSlashPos] = useState({ x: 0, y: 0 });
-  const [slashQuery, setSlashQuery] = useState('');
-  const [slashTriggerPos, setSlashTriggerPos] = useState<number | null>(null);
+  const savingRef = useRef(false);
+  const [savePending, setSavePending] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [draftStored, setDraftStored] = useState(true);
+  const savedRef = useRef(snapshotKey({ title: initialTitle, contentJson: parseDocument(initialContent), tagNames: initialTags, mood: initialMood }));
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -111,7 +120,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           if (node.type.name === 'heading') {
             return '标题...';
           }
-          return '输入 / 唤起 Block 指令或键入文本... (Alt+↑/↓ 移动 Block，Ctrl+Enter 提交)';
+          return '输入文字，或按 / 选择块类型';
         },
       }),
       CalloutNode,
@@ -120,24 +129,16 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
       EmbedNode,
       ColumnList,
       Column,
+      SlashCommand,
     ],
-    content: initialContent || {
-      type: 'doc',
-      content: [
-        {
-          type: 'paragraph',
-        },
-      ],
-    },
-    // NOTE: slash-menu state tracking lives in `editorProps` below.
-    // In tiptap v2, `onUpdate`/`onSelectionUpdate` callbacks are registered
-    // once at editor creation and never re-wired, so closures over React
-    // state go stale there. `editorProps` handlers ARE refreshed on every
-    // render (setOptions → view.setProps), which keeps the menu logic live.
+    content: initialSnapshot.contentJson,
     editorProps: {
       handleDOMEvents: {
+        // Let the native IME commit its candidate without passing Enter through
+        // ProseMirror keymaps. Returning here does not prevent the DOM default.
+        keydown: (view, event) => event.isComposing || view.composing || event.keyCode === 229,
         dragover: (view, event) => {
-          const isBlock = typeof window !== 'undefined' && (window as any).__feedmobDraggedBlockPos !== undefined && (window as any).__feedmobDraggedBlockPos !== null;
+          const isBlock = getDraggedBlockPos(view) !== null;
           if (isBlock) {
             event.preventDefault();
             if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
@@ -147,26 +148,8 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         },
       },
       handleDrop: (view, event) => {
-        const dt = event.dataTransfer;
-        let sourcePos: number | null = null;
-
-        if (dt) {
-          try {
-            const sourceStr = dt.getData(BLOCK_DRAG_MIME);
-            if (sourceStr) sourcePos = parseInt(sourceStr, 10);
-          } catch {}
-        }
-
-        if ((sourcePos === null || !Number.isFinite(sourcePos)) && typeof window !== 'undefined') {
-          const globalPos = (window as any).__feedmobDraggedBlockPos;
-          if (typeof globalPos === 'number' && Number.isFinite(globalPos)) {
-            sourcePos = globalPos;
-          }
-        }
-
-        if (sourcePos === null || !Number.isFinite(sourcePos) || !editor) {
-          return false;
-        }
+        const sourcePos = getDraggedBlockPos(view);
+        if (sourcePos === null || !editor) return false;
 
         event.preventDefault();
         if (typeof document !== 'undefined') {
@@ -174,11 +157,8 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
             el.classList.remove('feedmob-drag-source-active');
           });
         }
-        // Column (side) drops are explicit: only while ⇧ is held, otherwise a
-        // plain vertical drag near the left edge would accidentally wrap two
-        // rows into a side-by-side layout.
         const dropTarget = computeBlockDropTarget(view, event.clientX, event.clientY, {
-          allowSides: event.shiftKey,
+          sourcePos,
         });
         if (dropTarget !== null) {
           moveBlockToDropTarget(editor, sourcePos, dropTarget);
@@ -187,7 +167,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
       },
       handleClick: (view, pos, event) => {
         const dom = event.target as HTMLElement;
-        if (dom && dom.classList && dom.classList.contains('tiptap')) {
+        if (dom === view.dom && event.clientY >= (view.dom.lastElementChild?.getBoundingClientRect().bottom ?? 0)) {
           const { doc } = view.state;
           const lastChild = doc.lastChild;
           const isLastEmpty =
@@ -208,6 +188,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         return false;
       },
       handleKeyDown: (view, event) => {
+        if (event.isComposing || view.composing || event.keyCode === 229) return false;
         // Handle Alt + ArrowUp to move block up
         if (event.altKey && event.key === 'ArrowUp') {
           event.preventDefault();
@@ -229,69 +210,6 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           return true;
         }
 
-        // Handle '/' trigger for slash menu — only at the start of a line or
-        // right after whitespace, so URLs (https://…) don't pop the menu.
-        if (event.key === '/' && !editor?.isActive('codeBlock')) {
-          const { $from } = view.state.selection;
-          const charBefore =
-            $from.parentOffset > 0
-              ? $from.parent.textBetween(
-                  $from.parentOffset - 1,
-                  $from.parentOffset,
-                  '\n',
-                  '\n'
-                )
-              : '';
-          if ($from.parentOffset === 0 || /\s/.test(charBefore)) {
-            try {
-              const coords = view.coordsAtPos($from.pos);
-              setSlashPos({ x: coords.left, y: coords.bottom + 8 });
-              setSlashTriggerPos($from.pos);
-              setSlashQuery('');
-              setIsSlashOpen(true);
-            } catch {}
-          }
-        }
-
-        // Track slash query while deleting (Backspace over the '/' closes it)
-        if (
-          event.key === 'Backspace' &&
-          isSlashOpen &&
-          slashTriggerPos !== null
-        ) {
-          const { from } = view.state.selection;
-          if (from - 1 <= slashTriggerPos) {
-            setIsSlashOpen(false);
-            setSlashTriggerPos(null);
-          } else {
-            try {
-              const text = view.state.doc.textBetween(slashTriggerPos, from - 1, '\n', '\n');
-              if (!text.startsWith('/') || text.includes(' ') || text.includes('\n')) {
-                setIsSlashOpen(false);
-                setSlashTriggerPos(null);
-              } else {
-                setSlashQuery(text.slice(1));
-              }
-            } catch {
-              setIsSlashOpen(false);
-              setSlashTriggerPos(null);
-            }
-          }
-        }
-        if (event.key === 'Delete' && isSlashOpen && slashTriggerPos !== null) {
-          const { from } = view.state.selection;
-          if (from <= slashTriggerPos) {
-            setIsSlashOpen(false);
-            setSlashTriggerPos(null);
-          }
-        }
-
-        // Handle Escape to close slash menu
-        if (event.key === 'Escape' && isSlashOpen) {
-          setIsSlashOpen(false);
-          setSlashTriggerPos(null);
-        }
-
         // Handle Ctrl+Enter or Cmd+Enter to save immediately
         if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
           event.preventDefault();
@@ -301,86 +219,65 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
 
         return false;
       },
-      // Live slash-query tracking. handleTextInput (unlike onUpdate) is an
-      // editorProps handler, so its closure stays in sync with React state.
-      handleTextInput: (view, from, _to, text) => {
-        if (!isSlashOpen || slashTriggerPos === null) return false;
-        if (from < slashTriggerPos) {
-          setIsSlashOpen(false);
-          setSlashTriggerPos(null);
-          return false;
-        }
-        try {
-          const existing = view.state.doc.textBetween(slashTriggerPos, from, '\n', '\n');
-          const full = existing + text;
-          if (!full.startsWith('/') || full.includes(' ') || full.includes('\n')) {
-            setIsSlashOpen(false);
-            setSlashTriggerPos(null);
-          } else {
-            setSlashQuery(full.slice(1));
-          }
-        } catch {
-          setIsSlashOpen(false);
-          setSlashTriggerPos(null);
-        }
-        return false;
-      },
+
     },
   });
 
-  // Keep editor content in sync if initialContent changes — but only when the
-  // content is genuinely different. After every save the parent re-sets
-  // initialContent to a new object with identical JSON; re-running setContent
-  // there would reset the caret and wipe keystrokes typed during the save
-  // round-trip.
-  const lastAppliedContentRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!editor || !initialContent) return;
-    try {
-      const content = typeof initialContent === 'string' ? JSON.parse(initialContent) : initialContent;
-      const serialized = JSON.stringify(content);
-      if (serialized === lastAppliedContentRef.current) return;
-      lastAppliedContentRef.current = serialized;
-      editor.commands.setContent(content);
-    } catch (e) {
-      console.error('Failed to parse editor initial content', e);
-    }
-  }, [initialContent, editor]);
+  const slash = useSlashCommand(editor);
+  const currentSnapshotRef = useRef(initialSnapshot);
+  currentSnapshotRef.current = { title, contentJson: editor?.getJSON() ?? initialSnapshot.contentJson, tagNames: tags, mood };
 
+  // A mounted editor owns one document. Save responses are acknowledgements,
+  // never new editor input. Persist local drafts across date/user navigation.
   useEffect(() => {
-    // Value-compare before syncing so an unchanged snapshot (e.g. right after
-    // a save) never clobbers newer local edits.
-    setTitle((prev) => (prev === initialTitle ? prev : initialTitle));
-    setMood((prev) => (prev === initialMood ? prev : initialMood));
-    setTags((prev) =>
-      prev.length === initialTags.length && prev.every((t, i) => t === initialTags[i])
-        ? prev
-        : initialTags
-    );
-  }, [initialTitle, initialTags, initialMood]);
+    if (!editor) return;
+    const persist = () => {
+      const snapshot = { ...currentSnapshotRef.current, contentJson: editor.getJSON() };
+      currentSnapshotRef.current = snapshot;
+      const dirty = snapshotKey(snapshot) !== savedRef.current;
+      setIsDirty(dirty);
+      try {
+        if (dirty) localStorage.setItem(draftKey, JSON.stringify(snapshot));
+        else localStorage.removeItem(draftKey);
+        setDraftStored(true);
+      } catch { setDraftStored(false); setSaveError('本地草稿无法保存，请及时提交日志。'); }
+    };
+    persist();
+    editor.on('update', persist);
+    return () => { editor.off('update', persist); };
+  }, [editor, title, tags, mood, draftKey]);
 
   const handleManualSave = async () => {
-    if (!editor) return;
-    const json = editor.getJSON();
-    const text = editor.getText();
-
-    await onSave({
-      title,
-      contentJson: json,
-      contentText: text,
-      tagNames: tags,
-      mood,
-    });
-
-    const now = new Date();
-    setLastSavedTime(
-      `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
-    );
+    if (!editor || isSaving || savingRef.current) return;
+    savingRef.current = true;
+    setSavePending(true);
+    setSaveError(null);
+    const snapshot = { title, contentJson: editor.getJSON(), tagNames: tags, mood };
+    try {
+      await onSave({ ...snapshot, contentText: editor.getText() });
+      savedRef.current = snapshotKey(snapshot);
+      const dirty = snapshotKey(currentSnapshotRef.current) !== savedRef.current;
+      setIsDirty(dirty);
+      if (!dirty) {
+        try {
+          // An older, unmounted editor must not erase a newer draft of this date.
+          const stored = localStorage.getItem(draftKey);
+          if (stored === snapshotKey(snapshot)) localStorage.removeItem(draftKey);
+        } catch {}
+      }
+      setLastSavedTime(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '保存失败，请重试。');
+    } finally {
+      savingRef.current = false;
+      setSavePending(false);
+    }
   };
 
   const handleAddTag = () => {
     if (!newTagInput.trim()) return;
-    const cleanTag = newTagInput.trim().replace(/^#/, '');
+    const cleanTag = newTagInput.trim().replace(/^#+/, '').trim();
+    if (!cleanTag) return;
     if (!tags.includes(cleanTag)) {
       setTags([...tags, cleanTag]);
     }
@@ -394,7 +291,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
 
   const insertTemplate = () => {
     if (!editor) return;
-    SLASH_ITEMS[0].action(editor);
+    LOG_TEMPLATE.action(editor);
   };
 
   const { isFullWidth, toggleFullWidth } = useCurrentUser();
@@ -463,7 +360,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
                     value={newTagInput}
                     onChange={(e) => setNewTagInput(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddTag();
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleAddTag();
                       if (e.key === 'Escape') setIsAddingTag(false);
                     }}
                     autoFocus
@@ -525,11 +422,11 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
             <button
               type="button"
               onClick={handleManualSave}
-              disabled={isSaving}
+              disabled={isSaving || savePending}
               className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition disabled:opacity-50 shadow-xs"
             >
               <Save className="w-4 h-4" />
-              <span>{isSaving ? '正在保存...' : '提交工作日志'}</span>
+              <span>{isSaving || savePending ? '正在保存...' : '提交工作日志'}</span>
             </button>
           </div>
         </div>
@@ -583,48 +480,58 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); void handleManualSave(); }
+              else if (event.key === 'Enter' || event.key === 'ArrowDown') { event.preventDefault(); editor?.commands.focus('start'); }
+            }}
+            aria-label="日志标题"
             placeholder="输入今日日志重点概括..."
             className="w-full text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-100 placeholder:text-slate-300 dark:placeholder:text-slate-700 bg-transparent border-none outline-none mb-8 tracking-tight"
           />
 
           {/* Floating Bubble Menu for Selected Text */}
           {editor && (
-            <BubbleMenu
+            <SelectionToolbar
               editor={editor}
-              tippyOptions={{ duration: 100 }}
               className="flex items-center gap-1 bg-slate-900 text-white rounded-xl px-2 py-1.5 shadow-2xl border border-slate-700 text-sm"
             >
               <button
+                aria-label="加粗"
                 onClick={() => editor.chain().focus().toggleBold().run()}
                 className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('bold') ? 'bg-slate-800 text-emerald-400 font-bold' : ''}`}
               >
                 <Bold className="w-4 h-4" />
               </button>
               <button
+                aria-label="斜体"
                 onClick={() => editor.chain().focus().toggleItalic().run()}
                 className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('italic') ? 'bg-slate-800 text-emerald-400' : ''}`}
               >
                 <Italic className="w-4 h-4" />
               </button>
               <button
+                aria-label="下划线"
                 onClick={() => editor.chain().focus().toggleUnderline().run()}
                 className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('underline') ? 'bg-slate-800 text-emerald-400' : ''}`}
               >
                 <UnderlineIcon className="w-4 h-4" />
               </button>
               <button
+                aria-label="删除线"
                 onClick={() => editor.chain().focus().toggleStrike().run()}
                 className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('strike') ? 'bg-slate-800 text-emerald-400' : ''}`}
               >
                 <Strikethrough className="w-4 h-4" />
               </button>
               <button
+                aria-label="高亮"
                 onClick={() => editor.chain().focus().toggleHighlight().run()}
                 className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('highlight') ? 'bg-slate-800 text-yellow-400' : ''}`}
               >
                 <Highlighter className="w-4 h-4" />
               </button>
-            </BubbleMenu>
+            </SelectionToolbar>
           )}
 
           {/* Tiptap Editor Content */}
@@ -636,18 +543,11 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           {/* Slash Command Overlay */}
           <SlashCommandMenu
             editor={editor}
-            isOpen={isSlashOpen}
-            onClose={() => {
-              setIsSlashOpen(false);
-              setSlashTriggerPos(null);
-            }}
-            position={slashPos}
-            query={slashQuery}
-            range={
-              slashTriggerPos !== null && editor
-                ? { from: slashTriggerPos, to: editor.state.selection.from }
-                : undefined
-            }
+            isOpen={!!slash.match}
+            onClose={slash.close}
+            position={slash.position}
+            query={slash.match?.query}
+            range={slash.match ? { from: slash.match.from, to: slash.match.to } : undefined}
           />
         </div>
       </div>
@@ -658,9 +558,11 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-600 dark:text-slate-300">📅 日期：{date}</span>
             <span>•</span>
-            <span>💡 提示：输入 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">/</code> 唤起组件，悬浮左侧 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">⠿</code> 拖动移动（<code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">⇧+拖动</code> 并排分栏），或按 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">Alt + ↑/↓</code> 移动 Block</span>
+            <span>💡 提示：输入 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">/</code> 唤起组件；拖到块的上下方调整顺序，拖到左右边缘并排分栏；也可按 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">Alt + ↑/↓</code> 移动 Block</span>
           </div>
-          {lastSavedTime && (
+          {saveError && <span role="alert" className="text-red-600">{saveError}</span>}
+          {isDirty && <span role="status" className="text-amber-600">有未提交修改{draftStored ? ' · 已保留本地草稿' : ' · 请及时提交'}</span>}
+          {lastSavedTime && !isDirty && !saveError && (
             <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold shrink-0">
               <Check className="w-4 h-4" />
               <span>已于 {lastSavedTime} 成功保存</span>
@@ -671,6 +573,3 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
     </div>
   );
 };
-
-
-

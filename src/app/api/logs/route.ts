@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { parseDocument } from '@/components/editor/utils/document';
 
 export async function GET(req: Request) {
   try {
@@ -101,71 +102,80 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'userId and date are required' }, { status: 400 });
     }
 
+    let document;
+    try { document = parseDocument(contentJson); }
+    catch { return NextResponse.json({ error: 'Invalid document content' }, { status: 400 }); }
+    const cleanTags = Array.isArray(tagNames)
+      ? [...new Set(tagNames.filter((name): name is string => typeof name === 'string').map(name => name.trim().replace(/^#+/, '').trim()).filter(Boolean))]
+      : null;
+
     // Auto-detect blocker from text content
     const textToCheck = (contentText || '') + ' ' + (title || '');
     const hasBlocker = /【Blocker】|blocker|卡点|阻塞|风险|阻碍/i.test(textToCheck);
 
-    // Upsert the WorkLog
-    const workLog = await prisma.workLog.upsert({
-      where: {
-        userId_date: {
+    // Save the document and tag associations atomically.
+    const fullLog = await prisma.$transaction(async (tx) => {
+      const workLog = await tx.workLog.upsert({
+        where: {
+          userId_date: {
+            userId,
+            date,
+          },
+        },
+        update: {
+          title: title || null,
+          contentJson: JSON.stringify(document),
+          contentText: contentText || '',
+          hasBlocker,
+          mood: mood || null,
+        },
+        create: {
           userId,
           date,
+          title: title || null,
+          contentJson: JSON.stringify(document),
+          contentText: contentText || '',
+          hasBlocker,
+          mood: mood || '🚀',
         },
-      },
-      update: {
-        title: title || null,
-        contentJson: typeof contentJson === 'string' ? contentJson : JSON.stringify(contentJson),
-        contentText: contentText || '',
-        hasBlocker,
-        mood: mood || null,
-      },
-      create: {
-        userId,
-        date,
-        title: title || null,
-        contentJson: typeof contentJson === 'string' ? contentJson : JSON.stringify(contentJson),
-        contentText: contentText || '',
-        hasBlocker,
-        mood: mood || '🚀',
-      },
-    });
-
-    // Handle Tags association if provided
-    if (Array.isArray(tagNames)) {
-      // Clear existing tags
-      await prisma.tagOnLog.deleteMany({
-        where: { logId: workLog.id },
       });
 
-      for (const tagName of tagNames) {
-        if (!tagName) continue;
-        const tag = await prisma.tag.upsert({
-          where: { name: tagName.trim() },
-          update: {},
-          create: { name: tagName.trim() },
+      // Handle Tags association if provided
+      if (cleanTags !== null) {
+        // Clear existing tags
+        await tx.tagOnLog.deleteMany({
+          where: { logId: workLog.id },
         });
 
-        await prisma.tagOnLog.create({
-          data: {
-            logId: workLog.id,
-            tagId: tag.id,
-          },
-        });
+        for (const tagName of cleanTags) {
+          if (!tagName) continue;
+          const tag = await tx.tag.upsert({
+            where: { name: tagName.trim() },
+            update: {},
+            create: { name: tagName.trim() },
+          });
+
+          await tx.tagOnLog.create({
+            data: {
+              logId: workLog.id,
+              tagId: tag.id,
+            },
+          });
+        }
       }
-    }
 
-    // Return the updated log with relations
-    const fullLog = await prisma.workLog.findUnique({
-      where: { id: workLog.id },
-      include: {
-        user: { include: { team: true } },
-        tags: { include: { tag: true } },
-        reactions: { include: { user: true } },
-        comments: { include: { user: true } },
-      },
+      // Return the updated log with relations
+      return tx.workLog.findUnique({
+        where: { id: workLog.id },
+        include: {
+          user: { include: { team: true } },
+          tags: { include: { tag: true } },
+          reactions: { include: { user: true } },
+          comments: { include: { user: true } },
+        },
+      });
+
     });
-
     return NextResponse.json(fullLog);
   } catch (error) {
     console.error('Error saving log:', error);

@@ -1,46 +1,36 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
-import React, { useState } from 'react';
+import type { NodeViewProps } from '@tiptap/react';
+import { parseEmbedUrl } from '../utils/embed-url';
+import React, { useState, useEffect } from 'react';
 import { ExternalLink, Globe, Layout, Play, Settings } from 'lucide-react';
 
-const EmbedComponent = ({ node, updateAttributes }: any) => {
+const EmbedComponent = ({ node, updateAttributes }: NodeViewProps) => {
   const [isEditing, setIsEditing] = useState(!node.attrs.src);
   const [url, setUrl] = useState(node.attrs.src || '');
   const [type, setType] = useState<'figma' | 'video' | 'bookmark'>(node.attrs.type || 'bookmark');
 
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setUrl(node.attrs.src || '');
+    setType(node.attrs.type || 'bookmark');
+    setIsEditing(!node.attrs.src);
+  }, [node.attrs.src, node.attrs.type]);
   const handleSave = () => {
-    if (!url) return;
-    
-    // Auto-detect type
-    let detectedType = type;
-    if (url.includes('figma.com')) {
-      detectedType = 'figma';
-    } else if (url.includes('youtube.com') || url.includes('youtu.be') || url.includes('.mp4')) {
-      detectedType = 'video';
-    }
-
-    setType(detectedType);
-    updateAttributes({ src: url, type: detectedType });
-    setIsEditing(false);
+    try {
+      const parsed = parseEmbedUrl(url);
+      setError(null);
+      setUrl(parsed.src);
+      setType(parsed.type);
+      updateAttributes({ src: parsed.src, type: parsed.type });
+      setIsEditing(false);
+    } catch { setError('请输入有效的 http:// 或 https:// 链接。'); }
   };
-
-  const getEmbedUrl = (rawUrl: string, embedType: string) => {
-    if (embedType === 'figma') {
-      return `https://www.figma.com/embed?embed_host=feedmob&url=${encodeURIComponent(rawUrl)}`;
-    }
-    if (embedType === 'video' && rawUrl.includes('youtube.com/watch?v=')) {
-      const videoId = rawUrl.split('v=')[1]?.split('&')[0];
-      return `https://www.youtube.com/embed/${videoId}`;
-    }
-    if (embedType === 'video' && rawUrl.includes('youtu.be/')) {
-      const videoId = rawUrl.split('youtu.be/')[1]?.split('?')[0];
-      return `https://www.youtube.com/embed/${videoId}`;
-    }
-    return rawUrl;
-  };
+  let preview: ReturnType<typeof parseEmbedUrl> | null = null;
+  try { preview = parseEmbedUrl(node.attrs.src || ''); } catch {}
 
   return (
-    <NodeViewWrapper className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900">
+    <NodeViewWrapper contentEditable={false} className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900">
       <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
         <div className="flex items-center gap-2 font-semibold">
           {type === 'figma' && <Layout className="w-4 h-4 text-purple-500" />}
@@ -64,6 +54,7 @@ const EmbedComponent = ({ node, updateAttributes }: any) => {
               type="text"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); handleSave(); } }}
               placeholder="输入链接 (如 Figma 原型、GitHub PR、YouTube 视频或文档链接)..."
               className="flex-1 text-sm px-3.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 outline-none"
             />
@@ -75,20 +66,27 @@ const EmbedComponent = ({ node, updateAttributes }: any) => {
               确定嵌入
             </button>
           </div>
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         </div>
       ) : (
         <div className="p-2.5 bg-white dark:bg-slate-950">
-          {type === 'figma' || type === 'video' ? (
+          {!preview ? <p role="alert" className="p-3 text-red-600">链接无效，请点击设置修改。</p> : preview.isVideoFile ? (
+            <video src={preview.src} controls className="w-full max-h-80" />
+          ) : preview.type === 'figma' || preview.type === 'video' ? (
             <div className="w-full h-80 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
               <iframe
-                src={getEmbedUrl(url, type)}
+                src={preview.embedUrl}
+                title="嵌入内容预览"
+                sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+                referrerPolicy="strict-origin-when-cross-origin"
+                loading="lazy"
                 className="w-full h-full"
                 allowFullScreen
               />
             </div>
           ) : (
             <a
-              href={url}
+              href={preview.src}
               target="_blank"
               rel="noreferrer"
               className="flex items-center justify-between p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 transition group"

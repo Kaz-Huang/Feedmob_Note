@@ -1,52 +1,58 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import type { NodeViewProps } from '@tiptap/react';
 import React, { useRef, useState, useEffect } from 'react';
 import { Palette, Trash2, Undo, Download, PenTool, Square, Circle, MoveRight } from 'lucide-react';
 
-const WhiteboardComponent = ({ node, updateAttributes }: any) => {
+const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState('#2563eb');
   const [lineWidth, setLineWidth] = useState(3);
   const [tool, setTool] = useState<'pen' | 'rect' | 'arrow'>('pen');
-  const [history, setHistory] = useState<string[]>([]);
+  const latestDataRef = useRef<string | null>(null);
+  const drawingRef = useRef(false);
   const startPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Load saved canvas data if present
+  // Attributes are the source of truth, including editor undo/redo.
   useEffect(() => {
-    if (node.attrs.dataUrl && canvasRef.current) {
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const img = new Image();
-        img.onload = () => {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0);
-        };
-        img.src = node.attrs.dataUrl;
-      }
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx || latestDataRef.current === node.attrs.dataUrl) return;
+    latestDataRef.current = node.attrs.dataUrl;
+    let cancelled = false;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (node.attrs.dataUrl) {
+      const img = new Image();
+      img.onload = () => { if (!cancelled) { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); } };
+      img.src = node.attrs.dataUrl;
     }
-  }, []);
+    return () => { cancelled = true; };
+  }, [node.attrs.dataUrl]);
 
   const saveCanvas = () => {
     if (canvasRef.current) {
       const dataUrl = canvasRef.current.toDataURL();
+      latestDataRef.current = dataUrl;
       updateAttributes({ dataUrl });
-      setHistory(prev => [...prev.slice(-10), dataUrl]);
     }
   };
 
-  const getPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: (e.clientX - rect.left) * canvas.width / rect.width,
+      y: (e.clientY - rect.top) * canvas.height / rect.height,
     };
   };
 
-  const startDraw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const startDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drawingRef.current = true;
     const pos = getPos(e);
     startPos.current = pos;
     setIsDrawing(true);
@@ -62,8 +68,8 @@ const WhiteboardComponent = ({ node, updateAttributes }: any) => {
     ctx.lineJoin = 'round';
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!ctx) return;
@@ -76,8 +82,8 @@ const WhiteboardComponent = ({ node, updateAttributes }: any) => {
     }
   };
 
-  const stopDraw = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+  const stopDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     const pos = getPos(e);
@@ -90,9 +96,16 @@ const WhiteboardComponent = ({ node, updateAttributes }: any) => {
       ctx.beginPath();
       ctx.moveTo(startPos.current.x, startPos.current.y);
       ctx.lineTo(pos.x, pos.y);
+      const angle = Math.atan2(pos.y - startPos.current.y, pos.x - startPos.current.x);
+      const head = 12;
+      ctx.moveTo(pos.x - head * Math.cos(angle - Math.PI / 6), pos.y - head * Math.sin(angle - Math.PI / 6));
+      ctx.lineTo(pos.x, pos.y);
+      ctx.lineTo(pos.x - head * Math.cos(angle + Math.PI / 6), pos.y - head * Math.sin(angle + Math.PI / 6));
       ctx.stroke();
     }
 
+    drawingRef.current = false;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     setIsDrawing(false);
     saveCanvas();
   };
@@ -107,7 +120,7 @@ const WhiteboardComponent = ({ node, updateAttributes }: any) => {
   };
 
   return (
-    <NodeViewWrapper className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-900 shadow-xs">
+    <NodeViewWrapper contentEditable={false} className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-900 shadow-xs">
       {/* Header bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
         <div className="flex items-center gap-2">
@@ -157,6 +170,7 @@ const WhiteboardComponent = ({ node, updateAttributes }: any) => {
             ))}
           </div>
 
+          <button type="button" onClick={() => editor.commands.undo()} title="撤销" className="p-1.5 text-slate-500"><Undo className="w-4 h-4" /></button>
           <button
             type="button"
             onClick={clearCanvas}
@@ -175,10 +189,11 @@ const WhiteboardComponent = ({ node, updateAttributes }: any) => {
           ref={canvasRef}
           width={960}
           height={280}
-          onMouseDown={startDraw}
-          onMouseMove={draw}
-          onMouseUp={stopDraw}
-          onMouseLeave={stopDraw}
+          onPointerDown={startDraw}
+          onPointerMove={draw}
+          onPointerUp={stopDraw}
+          onPointerCancel={stopDraw}
+          style={{ touchAction: 'none' }}
           className="border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl cursor-crosshair shadow-inner max-w-full"
         />
       </div>

@@ -1,7 +1,8 @@
 import { Editor } from '@tiptap/react';
 import { Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { TextSelection } from '@tiptap/pm/state';
+import { TextSelection, NodeSelection } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
+import { convertBlock } from './block-conversion';
 
 /**
  * Custom MIME type used for block drag & drop.
@@ -53,7 +54,7 @@ export function resolveDomBlockPos(view: EditorView, dom: HTMLElement): number |
     const $pos = doc.resolve(pos);
     for (let d = $pos.depth; d >= 1; d--) {
       const n = $pos.node(d);
-      if (n.isBlock && !COLUMN_TYPES.has(n.type.name)) {
+      if (n.isBlock && !COLUMN_TYPES.has(n.type.name) && view.nodeDOM($pos.before(d)) === dom) {
         return $pos.before(d);
       }
     }
@@ -73,6 +74,12 @@ export function resolveDomBlockPos(view: EditorView, dom: HTMLElement): number |
 export function getBlockPosFromSelection(editor: Editor): number | null {
   const { state } = editor;
   const { $from } = state.selection;
+
+  if (state.selection instanceof NodeSelection) return state.selection.from;
+  // A list item (including its checkbox and nested children) is one block.
+  for (let depth = $from.depth; depth > 0; depth--) {
+    if (['listItem', 'taskItem'].includes($from.node(depth).type.name)) return $from.before(depth);
+  }
 
   if ($from.depth >= 1 && ($from.node($from.depth)?.isBlock ?? false)) {
     return $from.before($from.depth);
@@ -184,22 +191,25 @@ export function moveBlockAtPos(
   for (let i = 0; i < targetIndex; i++) {
     siblingPos += parent.child(i).nodeSize;
   }
-  const insertBoundary =
-    direction === 'up'
-      ? siblingPos
-      : siblingPos + parent.child(targetIndex).nodeSize;
-
   // The parent keeps other children (we only move at non-edge indices), so
   // the deletion never empties the parent and position mapping stays simple.
   const tr = state.tr;
-  tr.delete(blockPos, blockPos + node.nodeSize);
-  const safeInsert = Math.max(0, Math.min(tr.mapping.map(insertBoundary), tr.doc.content.size));
-  tr.insert(safeInsert, node);
+  const sibling = parent.child(targetIndex);
+  const safeInsert = direction === 'up' ? siblingPos : blockPos + sibling.nodeSize;
+  const replaceFrom = Math.min(blockPos, siblingPos);
+  const replaceTo = Math.max(blockPos + node.nodeSize, siblingPos + sibling.nodeSize);
+  const replacement = direction === 'up' ? [node, sibling] : [sibling, node];
+  // Swap atomically: deleting a required first paragraph can cause schema
+  // auto-filling and silently introduce an extra paragraph.
+  tr.replaceWith(replaceFrom, replaceTo, replacement);
+  if (!tr.docChanged) return false;
 
   try {
-    tr.setSelection(
-      TextSelection.near(tr.doc.resolve(Math.min(safeInsert + 1, tr.doc.content.size)))
-    );
+    const offset = state.selection.from >= blockPos && state.selection.to <= blockPos + node.nodeSize
+      ? state.selection.from - blockPos : 1;
+    tr.setSelection(state.selection instanceof NodeSelection
+      ? NodeSelection.create(tr.doc, safeInsert)
+      : TextSelection.near(tr.doc.resolve(Math.min(safeInsert + offset, tr.doc.content.size))));
   } catch {}
 
   view.dispatch(tr);
@@ -285,7 +295,11 @@ export function insertParagraphNear(
 
   const insertPos = side === 'above' ? blockPos : blockPos + node.nodeSize;
   const tr = state.tr;
-  tr.insert(insertPos, paraType.create());
+  const newBlock = ['listItem', 'taskItem'].includes(node.type.name)
+    ? node.type.createChecked(null, [paraType.create()]) : paraType.create();
+  const $insert = state.doc.resolve(insertPos);
+  if (!$insert.parent.canReplaceWith($insert.index(), $insert.index(), newBlock.type)) return false;
+  tr.insert(insertPos, newBlock);
   try {
     tr.setSelection(
       TextSelection.near(tr.doc.resolve(Math.min(insertPos + 1, tr.doc.content.size)))
@@ -304,7 +318,8 @@ export function turnBlockIntoColumns(editor: Editor, blockPos: number): boolean 
   const { state, view } = editor;
   const node = state.doc.nodeAt(blockPos);
   if (!node || !node.isBlock) return false;
-  if (node.type.name === 'columnList' || node.type.name === 'column') return false;
+  if (['listItem', 'taskItem'].includes(node.type.name)) return convertBlock(editor, blockPos, 'columns');
+  if (['columnList', 'column'].includes(node.type.name)) return false;
 
   const { schema } = state;
   const columnType = schema.nodes.column;
@@ -312,7 +327,7 @@ export function turnBlockIntoColumns(editor: Editor, blockPos: number): boolean 
   const paraType = schema.nodes.paragraph;
   if (!columnType || !columnListType || !paraType) return false;
 
-  const rightPara = paraType.create(null, [state.schema.text('👉 并排右栏内容...')]);
+  const rightPara = paraType.create();
   const tr = state.tr;
   tr.replaceWith(
     blockPos,
@@ -347,7 +362,7 @@ export interface BlockDropTarget {
   };
 }
 
-/** Vertical line threshold at the left/right edge of a block. */
+/** Width of the left/right hot zones that create or extend a column row. */
 const SIDE_THRESHOLD = 0.2;
 
 /**
@@ -355,17 +370,16 @@ const SIDE_THRESHOLD = 0.2;
  * and drop. Uses elementFromPoint and resolveDomBlockPos so every block kind
  * (text, atom, column row) resolves to a consistent position.
  *
- * Side zones (column creation) are opt-in via `allowSides` — pass the drag
- * event's shiftKey so reordering stays a plain vertical drag and column
- * splits require an explicit ⇧+drag gesture.
+ * Like Notion, moving into either outer edge creates a column without a
+ * modifier key. Passing `sourcePos` suppresses impossible self/ancestor
+ * targets so the blue guide never promises a drop that cannot happen.
  */
 export function computeBlockDropTarget(
   view: EditorView,
   clientX: number,
   clientY: number,
-  options?: { allowSides?: boolean }
+  options?: { sourcePos?: number }
 ): BlockDropTarget | null {
-  const allowSides = options?.allowSides ?? true;
   const editorDom = view.dom;
   if (!editorDom) return null;
 
@@ -404,6 +418,8 @@ export function computeBlockDropTarget(
   if (!blockEl || blockEl === editorDom) {
     return endOfDocDropTarget(view);
   }
+  const listItem = element.closest('li');
+  if (listItem && editorDom.contains(listItem)) blockEl = listItem;
 
   // 3. Resolve the ProseMirror block position from the DOM element
   const blockPos = resolveDomBlockPos(view, blockEl);
@@ -411,15 +427,25 @@ export function computeBlockDropTarget(
   const node = view.state.doc.nodeAt(blockPos);
   if (!node) return null;
 
+  const sourcePos = options?.sourcePos;
+  if (sourcePos !== undefined) {
+    const sourceNode = view.state.doc.nodeAt(sourcePos);
+    if (!sourceNode || sourcePos === blockPos) return null;
+    if (
+      (blockPos > sourcePos && blockPos < sourcePos + sourceNode.nodeSize) ||
+      (sourcePos > blockPos && sourcePos < blockPos + node.nodeSize)
+    ) return null;
+  }
+
   const rect = blockEl.getBoundingClientRect();
   const relX = clientX - rect.left;
   const relY = clientY - rect.top;
   const widthRatio = rect.width > 0 ? relX / rect.width : 0.5;
 
   let zone: DropZone = 'below';
-  if (allowSides && widthRatio <= SIDE_THRESHOLD) {
+  if (widthRatio <= SIDE_THRESHOLD) {
     zone = 'left';
-  } else if (allowSides && widthRatio >= 1 - SIDE_THRESHOLD) {
+  } else if (widthRatio >= 1 - SIDE_THRESHOLD) {
     zone = 'right';
   } else {
     zone = relY < rect.height * 0.5 ? 'above' : 'below';
@@ -444,39 +470,42 @@ export function computeBlockDropTarget(
     indHeight = 3.5;
     isVertical = false;
   } else if (zone === 'left' || zone === 'right') {
+    if (sourcePos !== undefined) {
+      const sourceType = view.state.doc.nodeAt(sourcePos)?.type.name;
+      if (sourceType === 'column' || sourceType === 'columnList') return null;
+    }
     isVertical = true;
     indWidth = 3.5;
 
-    // Check if the target block is already part of a multi-column row
+    // Check if the target block is already part of a multi-column row.
     const columnListEl = blockEl.closest('[data-type="column-list"]') as HTMLElement | null;
 
     if (columnListEl && editorDom.contains(columnListEl)) {
-      // Case A: inside an existing columnList (N columns -> N + 1 columns)
+      // Inside an existing row, show the guide on the actual column edge.
+      // Recomputing equal future widths places the guide away from the pointer
+      // and is especially wrong once column resizing is introduced.
       const rowRect = columnListEl.getBoundingClientRect();
       const allColEls = Array.from(columnListEl.children).filter(
         (el) => el.getAttribute('data-type') === 'column'
       ) as HTMLElement[];
-      const currentNumCols = Math.max(1, allColEls.length);
-      const nextNumCols = currentNumCols + 1;
-      const colWidth = rowRect.width / nextNumCols;
-
       const currentColEl = blockEl.closest('[data-type="column"]') as HTMLElement | null;
-      const currentColIndex = currentColEl ? Math.max(0, allColEls.indexOf(currentColEl)) : 0;
-
-      let dividerX: number;
-      if (zone === 'left') {
-        dividerX = rowRect.left + (currentColIndex === 0 ? colWidth : currentColIndex * colWidth);
-      } else {
-        dividerX = rowRect.left + (currentColIndex + 1) * colWidth;
-      }
+      if (!currentColEl || !allColEls.includes(currentColEl)) return null;
+      const currentColRect = currentColEl.getBoundingClientRect();
+      const dividerX = zone === 'left' ? currentColRect.left : currentColRect.right;
 
       indTop = rowRect.top;
       indLeft = dividerX - 1.75;
-      indHeight = Math.max(24, blockEl.getBoundingClientRect().height, rowRect.height);
+      indHeight = Math.max(24, rowRect.height);
     } else {
-      // Case B: standalone single block row (1 column -> 2 columns, 50%/50%)
+      const rowType = view.state.schema.nodes.columnList;
+      const $target = view.state.doc.resolve(blockPos);
+      if (!rowType || !$target.parent.canReplaceWith($target.index(), $target.index() + 1, rowType)) {
+        return null;
+      }
+      // For a standalone block, Notion previews the insertion at the edge
+      // under the pointer. The 50/50 sizing happens only after the drop.
       indTop = rect.top;
-      indLeft = rect.left + rect.width * 0.5 - 1.75;
+      indLeft = (zone === 'left' ? rect.left : rect.right) - 1.75;
       indHeight = Math.max(24, rect.height);
     }
   }
@@ -552,149 +581,71 @@ export function moveBlockToDropTarget(
   const sourceNode = doc.nodeAt(sourcePos);
   if (!sourceNode || !sourceNode.isBlock) return false;
 
-  const { zone, targetPos, targetNode } = dropTarget;
-
-  // Cannot drop a block onto itself
-  if (sourcePos === targetPos) {
-    return true;
-  }
-
-  // Never build columns out of empty paragraphs — invisible half-empty rows
-  // are exactly the "stray marker next to a block" artifact; degrade to a
-  // vertical move instead.
-  let effZone = zone;
-  if (
-    (zone === 'left' || zone === 'right') &&
-    (isEmptyParagraph(sourceNode) || isEmptyParagraph(targetNode))
-  ) {
-    effZone = 'below';
-  }
+  const { zone, targetPos } = dropTarget;
+  const targetNode = doc.nodeAt(targetPos);
+  if (!targetNode || !targetNode.eq(dropTarget.targetNode)) return false;
+  if (sourcePos === targetPos) return false;
+  // A row/callout/list cannot be dropped into its own descendants (or vice versa).
+  if ((targetPos > sourcePos && targetPos < sourcePos + sourceNode.nodeSize) ||
+      (sourcePos > targetPos && sourcePos < targetPos + targetNode.nodeSize)) return false;
 
   const tr = state.tr;
-
-  if (effZone === 'above' || effZone === 'below') {
-    // 1. Standard vertical reordering using exact position mapping
-    const insertBoundary =
-      effZone === 'above' ? targetPos : targetPos + targetNode.nodeSize;
-
-    if (
-      insertBoundary === sourcePos ||
-      insertBoundary === sourcePos + sourceNode.nodeSize
-    ) {
-      return true; // already at this position
-    }
-
-    tr.delete(sourcePos, sourcePos + sourceNode.nodeSize);
-    const mappedInsert = tr.mapping.map(insertBoundary);
-    const safeInsert = Math.max(0, Math.min(mappedInsert, tr.doc.content.size));
-    tr.insert(safeInsert, sourceNode);
-
-    const selPos = Math.min(safeInsert + 1, tr.doc.content.size);
-    try {
-      tr.setSelection(TextSelection.near(tr.doc.resolve(selPos)));
-    } catch {}
-
-    view.dispatch(tr);
-    return true;
-  }
-
-  if (effZone === 'left' || effZone === 'right') {
-    // 2. Side-by-side column creation / insertion
-    const columnType = schema.nodes.column;
-    const columnListType = schema.nodes.columnList;
-    if (!columnType || !columnListType) return false;
-
-    const createCol = (node: ProseMirrorNode) =>
-      node.type === columnType ? node : columnType.create(null, [node]);
-
-    // Is the target already inside a column row?
-    const $target = doc.resolve(targetPos);
-    let inColumnRow = false;
-    for (let d = $target.depth; d >= 1; d--) {
-      if ($target.node(d).type === columnListType) {
-        inColumnRow = true;
-        break;
-      }
-    }
-
-    // Phase 1: remove the source FIRST. Everything afterwards resolves in the
-    // updated doc, so it works no matter where the source lived — including
-    // inside the same row as the target.
-    tr.delete(sourcePos, sourcePos + sourceNode.nodeSize);
-
-    // Defensive fallback: if anything below fails, put the source back so a
-    // failed drop never silently loses content.
-    const restoreSource = () => {
-      const back = Math.max(0, Math.min(tr.mapping.map(sourcePos, -1), tr.doc.content.size));
-      tr.insert(back, sourceNode);
-    };
-
-    if (inColumnRow) {
-      // Phase 2: re-resolve the target inside the (possibly shrunken) row.
-      const mappedTarget = tr.mapping.map(targetPos, 1);
-      if (mappedTarget >= 0 && mappedTarget <= tr.doc.content.size) {
-        const $t = tr.doc.resolve(mappedTarget);
-        for (let d = $t.depth; d >= 2; d--) {
-          if (
-            $t.node(d).type === columnType &&
-            $t.node(d - 1).type === columnListType
-          ) {
-            const listNode = $t.node(d - 1);
-            const listPos = $t.before(d - 1);
-            const colIndex = $t.index(d - 1);
-
-            const cols: ProseMirrorNode[] = [];
-            listNode.forEach((c) => {
-              // Drop columns that were emptied by the source deletion.
-              if (c.childCount > 0) cols.push(c);
-            });
-
-            const insertIndex =
-              effZone === 'left'
-                ? Math.max(0, Math.min(colIndex, cols.length))
-                : Math.min(cols.length, colIndex + 1);
-            cols.splice(insertIndex, 0, createCol(sourceNode));
-
-            const newList = columnListType.create({ columns: cols.length }, cols);
-            tr.replaceWith(listPos, listPos + listNode.nodeSize, newList);
-
-            let newColPos = listPos + 1;
-            for (let i = 0; i < insertIndex; i++) newColPos += cols[i].nodeSize;
-            try {
-              tr.setSelection(TextSelection.near(tr.doc.resolve(newColPos + 2)));
-            } catch {}
-
-            view.dispatch(tr);
-            return true;
-          }
-        }
-      }
-      restoreSource();
-      view.dispatch(tr);
-      return true;
-    }
-
-    // Case B: standalone target — wrap [target, source] into a fresh 2-col row
-    const clampedTarget = Math.max(0, Math.min(tr.mapping.map(targetPos, 1), tr.doc.content.size));
-    const targetNodeNow = tr.doc.nodeAt(clampedTarget);
-    if (targetNodeNow && targetNodeNow.isBlock && targetNodeNow.type.name !== 'columnList') {
-      const col1 = createCol(effZone === 'left' ? sourceNode : targetNodeNow);
-      const col2 = createCol(effZone === 'left' ? targetNodeNow : sourceNode);
-      const newList = columnListType.create({ columns: 2 }, [col1, col2]);
-      tr.replaceWith(clampedTarget, clampedTarget + targetNodeNow.nodeSize, newList);
-
-      let srcColPos = clampedTarget + 1;
-      if (effZone === 'right') srcColPos += col1.nodeSize;
-      try {
-        tr.setSelection(TextSelection.near(tr.doc.resolve(srcColPos + 2)));
-      } catch {}
+  try {
+    // Remove a vacated column itself so schema auto-fill does not leave a ghost column.
+    const sourceParent = doc.resolve(sourcePos);
+    const isListItem = ['listItem', 'taskItem'].includes(sourceNode.type.name);
+    const portableNode = isListItem ? sourceParent.parent.type.createChecked(sourceParent.parent.attrs, [sourceNode]) : sourceNode;
+    if (isListItem && sourceParent.parent.childCount === 1) {
+      tr.delete(sourceParent.before(), sourceParent.after());
+    } else if (sourceParent.parent.type.name === 'column' && sourceParent.parent.childCount === 1 && sourceParent.node(sourceParent.depth - 1).childCount > 1) {
+      tr.delete(sourceParent.before(), sourceParent.after());
     } else {
-      restoreSource();
+      tr.delete(sourcePos, sourcePos + sourceNode.nodeSize);
     }
+    const mappedTarget = tr.mapping.map(targetPos);
+    const targetNow = tr.doc.nodeAt(mappedTarget);
+    if (!targetNow || !targetNow.eq(targetNode)) return false;
 
-    view.dispatch(tr);
+    if (zone === 'above' || zone === 'below') {
+      const insertion = zone === 'above' ? mappedTarget : mappedTarget + targetNow.nodeSize;
+      const $insert = tr.doc.resolve(insertion);
+      const insertNode = $insert.parent.canReplaceWith($insert.index(), $insert.index(), sourceNode.type) ? sourceNode : portableNode;
+      if (!$insert.parent.canReplaceWith($insert.index(), $insert.index(), insertNode.type)) return false;
+      tr.insert(insertion, insertNode);
+      tr.setSelection(TextSelection.near(tr.doc.resolve(insertion + 1)));
+    } else {
+      const { column: columnType, columnList: rowType } = schema.nodes;
+      if (!columnType || !rowType || sourceNode.type === columnType || sourceNode.type === rowType) return false;
+      const newColumn = columnType.createChecked(null, [portableNode]);
+      const $target = tr.doc.resolve(mappedTarget);
+      let columnDepth = $target.depth;
+      while (columnDepth > 0 && $target.node(columnDepth).type !== columnType) columnDepth--;
+      if (columnDepth > 0) {
+        const row = $target.node(columnDepth - 1);
+        const rowPos = $target.before(columnDepth - 1);
+        const cols: ProseMirrorNode[] = [];
+        row.forEach(col => cols.push(col));
+        const index = $target.index(columnDepth - 1) + (zone === 'right' ? 1 : 0);
+        cols.splice(index, 0, newColumn);
+        tr.replaceWith(rowPos, rowPos + row.nodeSize, rowType.createChecked({ columns: cols.length }, cols));
+        let insertedPos = rowPos + 2;
+        for (let i = 0; i < index; i++) insertedPos += cols[i].nodeSize;
+        tr.setSelection(TextSelection.near(tr.doc.resolve(insertedPos + 1)));
+      } else {
+        if (targetNow.type === rowType || targetNow.type === columnType) return false;
+        const targetColumn = columnType.createChecked(null, [targetNow]);
+        const cols = zone === 'left' ? [newColumn, targetColumn] : [targetColumn, newColumn];
+        const row = rowType.createChecked({ columns: 2 }, cols);
+        if (!$target.parent.canReplaceWith($target.index(), $target.index() + 1, rowType)) return false;
+        tr.replaceWith(mappedTarget, mappedTarget + targetNow.nodeSize, row);
+        tr.setSelection(TextSelection.near(tr.doc.resolve(mappedTarget + 3 + (zone === 'right' ? targetColumn.nodeSize : 0))));
+      }
+    }
+    tr.doc.check();
+    view.dispatch(tr.scrollIntoView());
     return true;
+  } catch {
+    // No dispatch on failure: retain the exact original document and undo stack.
+    return false;
   }
-
-  return false;
 }

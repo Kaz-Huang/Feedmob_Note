@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useCurrentUser } from '@/lib/user-context';
+import { parseDocument } from '@/components/editor/utils/document';
+import { format, addDays } from 'date-fns';
 import { WorkLog } from '@/types';
 import {
   Calendar,
@@ -25,38 +27,45 @@ const BlockEditor = dynamic(
 export default function TodayFocusPage() {
   const { currentUser } = useCurrentUser();
   const [selectedDate, setSelectedDate] = useState<string>(() => {
-    return new Date().toISOString().split('T')[0];
+    return format(new Date(), 'yyyy-MM-dd');
   });
   const [currentLog, setCurrentLog] = useState<WorkLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-
-  // Fetch current user's log for selectedDate
-  const fetchCurrentLog = async () => {
-    if (!currentUser) return;
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/logs?userId=${currentUser.id}&date=${selectedDate}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.length > 0) {
-          setCurrentLog(data[0]);
-        } else {
-          setCurrentLog(null);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to fetch current log', e);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const documentId = currentUser ? currentUser.id + ':' + selectedDate : '';
+  const activeKeyRef = useRef(documentId);
+  activeKeyRef.current = documentId;
 
   useEffect(() => {
-    if (currentUser) {
-      fetchCurrentLog();
-    }
-  }, [currentUser, selectedDate]);
+    if (!currentUser) return;
+    const controller = new AbortController();
+    const key = documentId;
+    setIsLoading(true);
+    setLoadError(null);
+    setIsSaving(false);
+    const load = async () => {
+      try {
+        const res = await fetch('/api/logs?userId=' + encodeURIComponent(currentUser.id) + '&date=' + selectedDate, { signal: controller.signal });
+        if (!res.ok) throw new Error('日志加载失败，请重试。');
+        const logs = await res.json();
+        const log = logs[0] ?? null;
+        if (log) parseDocument(log.contentJson);
+        if (!controller.signal.aborted && activeKeyRef.current === key) {
+          setCurrentLog(log);
+          setLoadedKey(key);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted && activeKeyRef.current === key) setLoadError(error instanceof Error ? error.message : '日志加载失败。');
+      } finally {
+        if (!controller.signal.aborted && activeKeyRef.current === key) setIsLoading(false);
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [currentUser?.id, selectedDate, documentId, retry]);
 
   const handleSaveLog = async (data: {
     title: string;
@@ -65,7 +74,8 @@ export default function TodayFocusPage() {
     tagNames: string[];
     mood: string;
   }) => {
-    if (!currentUser) return;
+    if (!currentUser) throw new Error('请先选择用户。');
+    const savingKey = documentId;
     setIsSaving(true);
     try {
       const res = await fetch('/api/logs', {
@@ -82,24 +92,19 @@ export default function TodayFocusPage() {
         }),
       });
 
-      if (res.ok) {
-        const savedLog = await res.json();
-        setCurrentLog(savedLog);
-      }
-    } catch (e) {
-      console.error('Failed to save log', e);
+      if (!res.ok) throw new Error('保存失败，请重试。你的本地修改仍然保留。');
+      // Do not feed acknowledgements back as new editor content.
+      await res.json();
     } finally {
-      setIsSaving(false);
+      if (activeKeyRef.current === savingKey) setIsSaving(false);
     }
   };
 
   const changeDateBy = (days: number) => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + days);
-    setSelectedDate(d.toISOString().split('T')[0]);
+    setSelectedDate(format(addDays(new Date(selectedDate + 'T12:00:00'), days), 'yyyy-MM-dd'));
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
   const isToday = selectedDate === todayStr;
 
   return (
@@ -120,7 +125,7 @@ export default function TodayFocusPage() {
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => { if (e.target.value) setSelectedDate(e.target.value); }}
               className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-transparent border-0 text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
             />
             <button
@@ -151,7 +156,12 @@ export default function TodayFocusPage() {
 
       {/* Notion Full-Page Canvas */}
       <div className="flex-1 w-full flex flex-col">
-        <BlockEditor
+        {loadError ? (
+          <div role="alert" className="p-12 text-red-600">{loadError} <button type="button" className="underline" onClick={() => setRetry(value => value + 1)}>重试加载</button></div>
+        ) : isLoading || !currentUser || loadedKey !== documentId ? (
+          <div role="status" className="p-12 text-slate-400">正在加载日志…</div>
+        ) : <BlockEditor
+          documentId={documentId}
           key={`${currentUser?.id}-${selectedDate}`}
           date={selectedDate}
           initialTitle={currentLog?.title || ''}
@@ -160,7 +170,7 @@ export default function TodayFocusPage() {
           initialMood={currentLog?.mood || '🚀'}
           onSave={handleSaveLog}
           isSaving={isSaving}
-        />
+        />}
       </div>
     </div>
   );

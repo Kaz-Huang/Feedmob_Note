@@ -1,9 +1,10 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent } from '@tiptap/react';
+import type { NodeViewProps } from '@tiptap/react';
 import React from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, Info, Lightbulb } from 'lucide-react';
 
-const CalloutComponent = ({ node, updateAttributes }: any) => {
+const CalloutComponent = ({ node, updateAttributes }: NodeViewProps) => {
   const type = node.attrs.type || 'blocker';
 
   const typeConfig: Record<string, { icon: any; bg: string; border: string; text: string; label: string }> = {
@@ -42,7 +43,7 @@ const CalloutComponent = ({ node, updateAttributes }: any) => {
 
   return (
     <NodeViewWrapper className={`my-4 p-4 rounded-xl border flex gap-3.5 transition-colors ${current.bg} ${current.border}`}>
-      <div className="flex flex-col items-center select-none pt-0.5 shrink-0">
+      <div contentEditable={false} className="flex flex-col items-center select-none pt-0.5 shrink-0">
         <Icon className={`w-5 h-5 ${current.text}`} />
         <select
           value={type}
