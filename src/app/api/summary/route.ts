@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireUser } from '@/lib/server-user';
 
 export async function GET(req: Request) {
   try {
+    const actor = await requireUser();
+    if (actor instanceof NextResponse) return actor;
     const { searchParams } = new URL(req.url);
     const teamId = searchParams.get('teamId');
     const userId = searchParams.get('userId');

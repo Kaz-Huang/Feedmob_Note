@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { PenSquare, Activity, CalendarDays, Hash, PanelLeftClose, Users, X } from 'lucide-react';
+import { PenSquare, Activity, CalendarDays, Hash, PanelLeftClose, Users, Shield, X } from 'lucide-react';
 import { useCurrentUser } from '@/lib/user-context';
 import { MineworkMark } from '@/components/brand/MineworkMark';
 
@@ -75,6 +75,7 @@ export const Sidebar: React.FC = () => {
               <Icon size={17} strokeWidth={1.6} aria-hidden="true" /><span>{label}</span>
             </Link>
           ))}
+          {currentUser?.role === 'ADMIN' && <Link href="/admin" aria-current={pathname === '/admin' ? 'page' : undefined} onClick={() => setMobileSidebarOpen(false)} className={`flex min-h-10 items-center gap-2.5 rounded px-2.5 text-sm transition-colors ${pathname === '/admin' ? 'bg-[var(--sidebar-accent)] font-medium text-[var(--foreground)]' : 'text-[var(--muted-foreground)] hover:bg-[var(--sidebar-accent)] hover:text-[var(--foreground)]'}`}><Shield size={17} strokeWidth={1.6} aria-hidden="true" />管理面板</Link>}
         </nav>
         {teams.length > 0 && <section className="mt-8" aria-label="按团队查看日志">
           <p className="mb-2 px-2.5 text-xs font-medium text-[var(--muted-foreground)]">团队</p>

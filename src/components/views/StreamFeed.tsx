@@ -29,7 +29,7 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
       const res = await fetch(`/api/logs/${logId}/reactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, emoji }),
+        body: JSON.stringify({ emoji }),
       });
       if (res.ok) onRefresh();
     } catch (e) {
@@ -46,7 +46,7 @@ export const StreamFeed: React.FC<StreamFeedProps> = ({ logs, onRefresh }) => {
       const res = await fetch(`/api/logs/${logId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, content: text }),
+        body: JSON.stringify({ content: text }),
       });
       if (res.ok) {
         setCommentInputs((prev) => ({ ...prev, [logId]: '' }));

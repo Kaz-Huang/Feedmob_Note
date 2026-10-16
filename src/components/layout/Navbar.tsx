@@ -1,20 +1,21 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
 import { useCurrentUser } from '@/lib/user-context';
-import { FileText, Search, ChevronDown, PanelLeftOpen, PanelLeftClose, Check, Loader2, LogOut } from 'lucide-react';
+import { FileText, Search, ChevronDown, PanelLeftOpen, PanelLeftClose, Shield, Loader2, LogOut } from 'lucide-react';
 import { WeeklySummaryModal } from '../views/WeeklySummaryModal';
 import { MineworkMark } from '@/components/brand/MineworkMark';
 
 interface NavbarProps { onSearch?: (query: string) => void; }
 
-const pageLabels: Record<string, string> = { '/': '工作日志', '/stream': '团队动态', '/calendar': '日志日历', '/tags': '项目标签' };
+const pageLabels: Record<string, string> = { '/': '工作日志', '/stream': '团队动态', '/calendar': '日志日历', '/tags': '项目标签', '/admin': '管理面板' };
 
 export const Navbar: React.FC<NavbarProps> = ({ onSearch }) => {
   const pathname = usePathname();
-  const { currentUser, users, setCurrentUser, teams, selectedTeamId, setSelectedTeamId, isSidebarCollapsed, toggleSidebar, isMobileSidebarOpen } = useCurrentUser();
+  const { currentUser, updateCurrentUser, teams, selectedTeamId, setSelectedTeamId, isSidebarCollapsed, toggleSidebar, isMobileSidebarOpen } = useCurrentUser();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -60,7 +61,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onSearch }) => {
     try {
       const response = await fetch('/api/users', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: currentUser.id, name }) });
       if (!response.ok) throw new Error('显示名保存失败，请重试。');
-      setCurrentUser(await response.json());
+      updateCurrentUser(await response.json());
       setIsUserMenuOpen(false);
       profileButtonRef.current?.focus();
     } catch (error) { setRenameError(error instanceof Error ? error.message : '显示名保存失败，请重试。'); }
@@ -86,21 +87,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onSearch }) => {
           <FileText size={15} aria-hidden="true" /><span>周报</span>
         </button>
         <div ref={profileRef} className="relative">
-          <button ref={profileButtonRef} type="button" onClick={() => setIsUserMenuOpen(open => !open)} aria-label={`成员设置：${currentUser?.name || '当前用户'}`} aria-haspopup="dialog" aria-expanded={isUserMenuOpen} aria-controls={isUserMenuOpen ? 'profile-settings' : undefined} className="flex min-h-10 items-center gap-1.5 rounded px-1.5 transition-colors hover:bg-[var(--muted)]">
+          <button ref={profileButtonRef} type="button" onClick={() => setIsUserMenuOpen(open => !open)} aria-label={`账号设置：${currentUser?.name || '当前用户'}`} aria-haspopup="dialog" aria-expanded={isUserMenuOpen} aria-controls={isUserMenuOpen ? 'profile-settings' : undefined} className="flex min-h-10 items-center gap-1.5 rounded px-1.5 transition-colors hover:bg-[var(--muted)]">
             <span className="flex h-7 w-7 items-center justify-center rounded bg-[var(--muted)] text-xs font-medium text-[var(--foreground)]">{currentUser?.name?.[0] || 'M'}</span>
             <ChevronDown size={13} aria-hidden="true" className="text-[var(--muted-foreground)]" />
           </button>
-          {isUserMenuOpen && <div id="profile-settings" role="dialog" aria-label="成员设置" onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setIsUserMenuOpen(false); }} className="absolute right-0 top-full mt-1 w-[min(300px,calc(100vw-24px))] rounded-md border border-[var(--border)] bg-[var(--background)] p-3 shadow-lg">
-            <p className="mb-3 px-1 text-xs font-medium text-[var(--muted-foreground)]">成员设置</p>
+          {isUserMenuOpen && <div id="profile-settings" role="dialog" aria-label="账号设置" onBlur={event => { if (event.relatedTarget && !profileRef.current?.contains(event.relatedTarget as Node)) setIsUserMenuOpen(false); }} className="absolute right-0 top-full mt-1 w-[min(300px,calc(100vw-24px))] rounded-md border border-[var(--border)] bg-[var(--background)] p-3 shadow-lg">
+            <p className="mb-3 px-1 text-xs font-medium text-[var(--muted-foreground)]">账号设置</p>
             {currentUser && <form onSubmit={saveName} className="border-b border-[var(--border)] px-1 pb-4">
               <label htmlFor="member-display-name" className="mb-1.5 block text-xs text-[var(--muted-foreground)]">显示名</label>
               <div className="flex gap-2"><input ref={nameInputRef} id="member-display-name" value={displayName} onChange={event => setDisplayName(event.target.value)} disabled={isRenaming} aria-describedby={renameError ? 'member-name-error' : undefined} className="h-9 min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 text-sm" /><button type="submit" disabled={isRenaming} className="rounded bg-[var(--accent)] px-3 text-xs text-[var(--accent-foreground)] disabled:opacity-50">{isRenaming ? <Loader2 size={14} className="animate-spin" aria-label="正在保存" /> : '保存'}</button></div>
               {renameError && <p id="member-name-error" role="alert" className="mt-2 text-xs text-red-600">{renameError}</p>}
             </form>}
-            <p className="mb-1 mt-3 px-1 text-xs text-[var(--muted-foreground)]">切换成员</p>
-            <div className="max-h-64 overflow-y-auto">{users.map(user => <button key={user.id} type="button" disabled={isRenaming} onClick={() => { setCurrentUser(user); setIsUserMenuOpen(false); profileButtonRef.current?.focus(); }} className="flex min-h-11 w-full items-center gap-2.5 rounded px-2 text-left hover:bg-[var(--muted)] disabled:opacity-50">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-[var(--muted)] text-xs">{user.name[0]}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm">{user.name}</span><span className="block truncate text-xs text-[var(--muted-foreground)]">{user.title || '成员'}</span></span>{user.id === currentUser?.id && <Check size={14} aria-label="当前成员" />}
-            </button>)}</div>
+            <div className="px-1 pt-3 text-xs text-[var(--muted-foreground)]">
+              <p className="break-all">{currentUser?.email}</p>
+              <p className="mt-1">{currentUser?.role === 'ADMIN' ? '管理员' : '成员'}</p>
+            </div>
+            {currentUser?.role === 'ADMIN' && <Link href="/admin" onClick={() => setIsUserMenuOpen(false)} className="popover-row mt-2"><Shield size={15} />管理面板</Link>}
             <div className="mt-3 border-t border-[var(--border)] pt-2"><button type="button" onClick={() => void signOut({ callbackUrl: '/login' })} className="popover-row"><LogOut size={15} />退出登录</button></div>
           </div>}
         </div>

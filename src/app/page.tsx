@@ -86,7 +86,7 @@ export default function TodayFocusPage() {
     tagNames: string[];
     mood: string;
   }) => {
-    if (!currentUser) throw new Error('请先选择用户。');
+    if (!currentUser) throw new Error('请先登录。');
     const savingKey = documentId;
     setIsSaving(true);
     try {
@@ -94,7 +94,6 @@ export default function TodayFocusPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: currentUser.id,
           date: selectedDate,
           title: data.title,
           contentJson: data.contentJson,
@@ -104,7 +103,7 @@ export default function TodayFocusPage() {
         }),
       });
 
-      if (!res.ok) throw new Error('保存失败，请重试。你的本地修改仍然保留。');
+      if (!res.ok) throw new Error(res.status === 403 ? '没有修改该日志的权限。你的本地草稿仍然保留。' : '保存失败，请重试。你的本地修改仍然保留。');
       // Do not feed acknowledgements back as new editor content.
       await res.json();
     } finally {

@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireUser } from '@/lib/server-user';
 
 export async function GET() {
   try {
+    const actor = await requireUser();
+    if (actor instanceof NextResponse) return actor;
     const tags = await prisma.tag.findMany({
       include: {
         _count: {
@@ -22,6 +25,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const actor = await requireUser();
+    if (actor instanceof NextResponse) return actor;
     const body = await req.json();
     const { name, color } = body;
     if (!name) {

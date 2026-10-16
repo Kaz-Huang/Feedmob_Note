@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireUser, forbiddenIdentity } from '@/lib/server-user';
 import { parseDocument } from '@/components/editor/utils/document';
 
 export async function GET(req: Request) {
   try {
+    const actor = await requireUser();
+    if (actor instanceof NextResponse) return actor;
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
     const teamId = searchParams.get('teamId');
@@ -95,8 +98,12 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const actor = await requireUser();
+    if (actor instanceof NextResponse) return actor;
     const body = await req.json();
-    const { userId, date, title, contentJson, contentText, mood, tagNames } = body;
+    const { date, title, contentJson, contentText, mood, tagNames } = body;
+    if (body.userId !== undefined && body.userId !== actor.id) return forbiddenIdentity();
+    const userId = actor.id;
 
     if (!userId || !date) {
       return NextResponse.json({ error: 'userId and date are required' }, { status: 400 });

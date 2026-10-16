@@ -1,14 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { requireUser, forbiddenIdentity } from '@/lib/server-user';
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const actor = await requireUser();
+    if (actor instanceof NextResponse) return actor;
     const { id } = await params;
     const body = await req.json();
-    const { userId, emoji } = body;
+    const { emoji } = body;
+
+    if (body.userId !== undefined && body.userId !== actor.id) return forbiddenIdentity();
+    const userId = actor.id;
 
     if (!userId || !emoji) {
       return NextResponse.json({ error: 'userId and emoji are required' }, { status: 400 });
