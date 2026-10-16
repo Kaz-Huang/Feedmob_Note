@@ -1,11 +1,13 @@
 import { Node, mergeAttributes } from '@tiptap/core';
-import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { ReactNodeViewRenderer } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
+import { ResizableBlock, blockSizeAttributes } from '../ResizableBlock';
 import { parseEmbedUrl } from '../utils/embed-url';
 import React, { useState, useEffect } from 'react';
 import { ExternalLink, Globe, Layout, Play, Settings } from 'lucide-react';
 
-const EmbedComponent = ({ node, updateAttributes }: NodeViewProps) => {
+const EmbedComponent = (props: NodeViewProps) => {
+  const { node, updateAttributes } = props;
   const [isEditing, setIsEditing] = useState(!node.attrs.src);
   const [url, setUrl] = useState(node.attrs.src || '');
   const [type, setType] = useState<'figma' | 'video' | 'bookmark'>(node.attrs.type || 'bookmark');
@@ -30,7 +32,7 @@ const EmbedComponent = ({ node, updateAttributes }: NodeViewProps) => {
   try { preview = parseEmbedUrl(node.attrs.src || ''); } catch {}
 
   return (
-    <NodeViewWrapper contentEditable={false} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--muted)]">
+    <ResizableBlock {...props} allowHeight={!!preview && (preview.type !== 'bookmark')} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--muted)]">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--muted)] text-sm text-[var(--foreground)] border-b border-[var(--border)]">
         <div className="flex items-center gap-2 font-medium">
           {type === 'figma' && <Layout className="w-4 h-4 text-[var(--muted-foreground)]" />}
@@ -74,9 +76,9 @@ const EmbedComponent = ({ node, updateAttributes }: NodeViewProps) => {
       ) : (
         <div className="p-2.5 bg-[var(--background)]">
           {!preview ? <p role="alert" className="p-3 text-red-600">链接无效，请点击设置修改。</p> : preview.isVideoFile ? (
-            <video src={preview.src} controls className="w-full max-h-80" />
+            <video src={preview.src} controls className="resizable-block-body embed-video w-full" />
           ) : preview.type === 'figma' || preview.type === 'video' ? (
-            <div className="w-full h-80 rounded-md overflow-hidden border border-[var(--border)]">
+            <div className="resizable-block-body embed-frame w-full rounded-md overflow-hidden border border-[var(--border)]">
               <iframe
                 src={preview.embedUrl}
                 title="嵌入内容预览"
@@ -108,7 +110,7 @@ const EmbedComponent = ({ node, updateAttributes }: NodeViewProps) => {
           )}
         </div>
       )}
-    </NodeViewWrapper>
+    </ResizableBlock>
   );
 };
 
@@ -121,6 +123,7 @@ export const EmbedNode = Node.create({
 
   addAttributes() {
     return {
+      ...blockSizeAttributes,
       src: { default: '' },
       type: { default: 'bookmark' },
     };

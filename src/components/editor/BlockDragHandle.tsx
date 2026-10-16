@@ -97,6 +97,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     };
     const handleMouseMove = (event: MouseEvent) => {
       if (isMenuOpen || isDragging) return;
+      if ((event.target as Element).closest?.('[data-editor-control]')) { hide(); return; }
       if (handleRef.current?.contains(event.target as Node)) { clearHide(); return; }
       const hit = findBlockAtPoint(editor.view, event.clientX, event.clientY);
       if (!hit) { hide(); return; }

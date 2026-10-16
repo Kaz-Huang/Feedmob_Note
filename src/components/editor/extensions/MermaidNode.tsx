@@ -1,10 +1,12 @@
 import { Node, mergeAttributes } from '@tiptap/core';
-import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { ReactNodeViewRenderer } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
+import { ResizableBlock, blockSizeAttributes } from '../ResizableBlock';
 import React, { useEffect, useRef, useState } from 'react';
 import { Code2, Eye, GitGraph } from 'lucide-react';
 
-const MermaidComponent = ({ node, updateAttributes }: NodeViewProps) => {
+const MermaidComponent = (props: NodeViewProps) => {
+  const { node, updateAttributes } = props;
   const [isEditing, setIsEditing] = useState(false);
   const [code, setCode] = useState(
     node.attrs.code ||
@@ -59,7 +61,7 @@ const MermaidComponent = ({ node, updateAttributes }: NodeViewProps) => {
   };
 
   return (
-    <NodeViewWrapper contentEditable={false} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--muted)]">
+    <ResizableBlock {...props} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--muted)]">
       {/* Header bar */}
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--muted)] text-sm text-[var(--foreground)] border-b border-[var(--border)]">
         <div className="flex items-center gap-2 font-medium">
@@ -97,7 +99,7 @@ const MermaidComponent = ({ node, updateAttributes }: NodeViewProps) => {
       ) : (
         <div
           ref={containerRef}
-          className="p-4 flex min-w-0 flex-col items-center justify-center bg-[var(--background)] min-h-[140px] overflow-x-auto"
+          className="resizable-block-body mermaid-viewport p-4 flex min-w-0 flex-col items-center justify-center bg-[var(--background)] min-h-[140px] overflow-auto"
         >
           {error ? (
             <div className="text-red-500 text-sm p-3 bg-red-50 dark:bg-red-950/40 rounded border border-red-200">
@@ -111,7 +113,7 @@ const MermaidComponent = ({ node, updateAttributes }: NodeViewProps) => {
           )}
         </div>
       )}
-    </NodeViewWrapper>
+    </ResizableBlock>
   );
 };
 
@@ -123,6 +125,7 @@ export const MermaidNode = Node.create({
 
   addAttributes() {
     return {
+      ...blockSizeAttributes,
       code: {
         default:
           'graph TD\n  A[开始] --> B[处理]\n  B --> C[结束]',

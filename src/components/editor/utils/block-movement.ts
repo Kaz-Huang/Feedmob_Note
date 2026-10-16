@@ -404,7 +404,10 @@ export function computeBlockDropTarget(
     const leftBand = Math.min(LEFT_SIDE_ZONE, rect.width / 5);
     // Top/bottom edges retain vertical ordering. The entire middle of a
     // block is a right-column target, without travelling to its far edge.
+    const columnRect = hit.column?.getBoundingClientRect();
     if (gap) zone = gap.zone;
+    else if (columnRect && clientX >= columnRect.left && clientX <= columnRect.right && clientY > rect.bottom) zone = 'below';
+    else if (columnRect && clientX >= columnRect.left && clientX <= columnRect.right && clientY < rect.top) zone = 'above';
     else if (clientX < rect.left) zone = 'left';
     else if (clientX > rect.right) zone = 'right';
     else if (clientY < rect.top + verticalBand) zone = 'above';
@@ -550,7 +553,7 @@ export function moveBlockToDropTarget(
         row.forEach(col => cols.push(col));
         const index = $target.index(columnDepth - 1) + (zone === 'right' ? 1 : 0);
         cols.splice(index, 0, newColumn);
-        tr.replaceWith(rowPos, rowPos + row.nodeSize, rowType.createChecked({ columns: cols.length }, cols));
+        tr.replaceWith(rowPos, rowPos + row.nodeSize, rowType.createChecked({ ...row.attrs, columns: cols.length }, cols));
         let insertedPos = rowPos + 2;
         for (let i = 0; i < index; i++) insertedPos += cols[i].nodeSize;
         tr.setSelection(TextSelection.near(tr.doc.resolve(insertedPos + 1)));

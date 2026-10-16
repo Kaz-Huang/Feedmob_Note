@@ -1,6 +1,7 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { columnView, columnWeight } from './column-view';
 
 export const ColumnList = Node.create({
   name: 'columnList',
@@ -30,7 +31,7 @@ export const ColumnList = Node.create({
       'div',
       mergeAttributes(HTMLAttributes, {
         'data-type': 'column-list',
-        class: 'column-list-wrapper flex flex-row items-start gap-4 my-1.5 w-full',
+        class: 'column-list-wrapper',
       }),
       0,
     ];
@@ -101,6 +102,16 @@ export const Column = Node.create({
   content: 'block+',
   isolating: true,
 
+  addAttributes() {
+    return {
+      width: {
+        default: 1,
+        parseHTML: element => columnWeight(element.getAttribute('data-column-width')),
+        renderHTML: attributes => ({ 'data-column-width': columnWeight(attributes.width), style: `flex: ${columnWeight(attributes.width)} 1 0%` }),
+      },
+    };
+  },
+
   parseHTML() {
     return [
       {
@@ -114,9 +125,11 @@ export const Column = Node.create({
       'div',
       mergeAttributes(HTMLAttributes, {
         'data-type': 'column',
-        class: 'column-block flex-1 min-w-0',
+        class: 'column-block',
       }),
       0,
     ];
   },
+
+  addNodeView() { return columnView; },
 });

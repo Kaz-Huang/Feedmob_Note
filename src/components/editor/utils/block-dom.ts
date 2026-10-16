@@ -84,6 +84,7 @@ function nearestChild(scope: HTMLElement, x: number, y: number, view?: EditorVie
   let bestDistance = Infinity;
   for (const el of Array.from(scope.children)) {
     if (!(el instanceof HTMLElement)) continue;
+    if (el.matches('[data-editor-control]')) continue;
     if (view && excludePos !== undefined && hitFromElement(view, el)?.pos === excludePos) continue;
     const rect = el.getBoundingClientRect();
     if (!rect.width || !rect.height) continue;

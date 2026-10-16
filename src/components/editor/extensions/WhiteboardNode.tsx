@@ -1,10 +1,12 @@
 import { Node, mergeAttributes } from '@tiptap/core';
-import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { ReactNodeViewRenderer } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
+import { ResizableBlock, blockSizeAttributes } from '../ResizableBlock';
 import React, { useRef, useState, useEffect } from 'react';
 import { Palette, Trash2, Undo, PenTool, Square, MoveRight } from 'lucide-react';
 
-const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) => {
+const WhiteboardComponent = (props: NodeViewProps) => {
+  const { node, updateAttributes, editor } = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState('#2563eb');
@@ -120,7 +122,7 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
   };
 
   return (
-    <NodeViewWrapper contentEditable={false} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--background)]">
+    <ResizableBlock {...props} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--background)]">
       {/* Header bar */}
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--muted)] text-sm text-[var(--foreground)] border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
@@ -203,10 +205,10 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
           onPointerUp={stopDraw}
           onPointerCancel={stopDraw}
           style={{ touchAction: 'none' }}
-          className="border border-dashed border-[var(--border)] bg-[var(--background)] rounded-md cursor-crosshair max-w-full h-auto"
+          className="resizable-block-body whiteboard-canvas border border-dashed border-[var(--border)] bg-[var(--background)] rounded-md cursor-crosshair"
         />
       </div>
-    </NodeViewWrapper>
+    </ResizableBlock>
   );
 
 };
@@ -219,6 +221,7 @@ export const WhiteboardNode = Node.create({
 
   addAttributes() {
     return {
+      ...blockSizeAttributes,
       dataUrl: {
         default: null,
       },
