@@ -28,6 +28,7 @@ import { getDraggedBlockPos } from './utils/block-drag';
 import { useSlashCommand } from './useSlashCommand';
 import { parseDocument, snapshotKey, type DocumentSnapshot } from './utils/document';
 import { useCurrentUser } from '@/lib/user-context';
+import { BEFORE_APP_REFRESH, type AppRefreshDetail } from '@/lib/app-update';
 import {
   Bold,
   Italic,
@@ -246,11 +247,21 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         if (dirty) localStorage.setItem(draftKey, JSON.stringify(snapshot));
         else localStorage.removeItem(draftKey);
         setDraftStored(true);
-      } catch { setDraftStored(false); setSaveError('本地草稿无法保存，请及时提交日志。'); }
+      } catch { setDraftStored(false); setSaveError('本地草稿无法保存，请及时提交日志。'); return false; }
+      return true;
+    };
+    const beforeRefresh = (event: Event) => {
+      const refreshEvent = event as CustomEvent<AppRefreshDetail>;
+      let reason: string | undefined;
+      if (savingRef.current) reason = '日志正在提交，请完成后再刷新。';
+      else if (editor.view.composing) reason = '请先完成当前文字输入，再刷新更新。';
+      else if (!persist()) reason = '草稿未能保存，请先提交日志，再刷新更新。';
+      if (reason) { refreshEvent.detail.reason = reason; refreshEvent.preventDefault(); }
     };
     persist();
     editor.on('update', persist);
-    return () => { editor.off('update', persist); };
+    window.addEventListener(BEFORE_APP_REFRESH, beforeRefresh);
+    return () => { editor.off('update', persist); window.removeEventListener(BEFORE_APP_REFRESH, beforeRefresh); };
   }, [editor, title, tags, mood, draftKey]);
 
   const handleManualSave = async () => {

@@ -16,6 +16,8 @@ RUN npx prisma generate
 COPY next.config.mjs tsconfig.json postcss.config.mjs tailwind.config.ts ./
 COPY src ./src
 COPY scripts ./scripts
+ARG MINEWORK_BUILD_VERSION
+ENV MINEWORK_BUILD_VERSION=${MINEWORK_BUILD_VERSION}
 RUN npm run build
 RUN npm prune --omit=dev
 

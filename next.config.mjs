@@ -1,12 +1,19 @@
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'node:crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+// A build shares one ID between the client bundle and .next/BUILD_ID. Workers
+// inherit it; starting a previously built image never changes the built ID.
+const appVersion = process.env.MINEWORK_BUILD_VERSION || randomUUID();
+process.env.MINEWORK_BUILD_VERSION = appVersion;
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  generateBuildId: async () => appVersion,
+  env: { NEXT_PUBLIC_APP_VERSION: appVersion },
   // 显式锁定当前目录为项目根目录，避免 Next.js 误将父目录识别为 Workspace 导致文件监听失效
   outputFileTracingRoot: __dirname,
   images: {

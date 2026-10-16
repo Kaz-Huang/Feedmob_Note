@@ -96,6 +96,7 @@ kbd { font-family: inherit; white-space: nowrap; font-size: 11px; color: var(--m
 .block-selection-toolbar { position: fixed; z-index: 60; left: 50%; bottom: 65px; transform: translateX(-50%); max-width: calc(100vw - 16px); }
 .link-popover { width: min(320px, calc(100vw - 16px)); padding: 12px; }
 .link-input { width: 100%; border: 1px solid var(--border); border-radius: 4px; background: var(--muted); color: var(--foreground); padding: 7px 9px; font-size: 13px; }
+.app-update-notice { position: fixed; z-index: 70; right: 20px; bottom: 20px; display: flex; align-items: center; gap: 12px; width: min(420px, calc(100vw - 32px)); padding: 14px 16px; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--popover-shadow); font-size: 13px; }
 
 /* Comfortable document typography. Content, not controls, gets the space. */
 .tiptap { outline: none; min-height: 260px; width: 100%; font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; }

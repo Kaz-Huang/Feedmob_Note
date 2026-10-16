@@ -20,6 +20,7 @@ export function columnView({ node, editor, getPos }: NodeViewRendererProps) {
   append.className = 'column-add-block';
   append.dataset.editorControl = 'true';
   append.setAttribute('aria-label', '在此列末尾添加区块');
+  append.title = '在此列继续记录，点击选择区块类型';
   append.textContent = '＋ 添加区块';
   const handle = document.createElement('div');
   handle.contentEditable = 'false';
@@ -99,7 +100,7 @@ export function columnView({ node, editor, getPos }: NodeViewRendererProps) {
     const min = width > 0 ? Math.min(0.25, 120 / width) : 0.2;
     apply(pair, event.key === 'Home' ? 0.5 : Math.max(min, Math.min(1 - min, ratio + (event.key === 'ArrowRight' ? 0.025 : -0.025))));
   });
-  const addBlock = () => {
+  const addBlock = (openMenu = false) => {
     const pos = getPos();
     if (typeof pos !== 'number' || editor.isDestroyed || !editor.isEditable) return;
     const col = editor.state.doc.nodeAt(pos);
@@ -109,12 +110,18 @@ export function columnView({ node, editor, getPos }: NodeViewRendererProps) {
     let caret = pos + col.nodeSize - 1;
     if (last?.type.name === 'paragraph' && !last.content.size) caret -= last.nodeSize - 1;
     else { tr.insert(caret, editor.schema.nodes.paragraph.create()); caret++; }
+    // Match the editor's other + controls: an explicit click opens the block
+    // picker, including when we reuse an existing empty paragraph.
+    if (openMenu) { tr.insertText('/', caret); caret++; }
     tr.setSelection(TextSelection.near(tr.doc.resolve(caret)));
-    editor.view.dispatch(tr.scrollIntoView());
+    editor.view.dispatch(tr);
     editor.view.focus();
+    const block = editor.view.domAtPos(caret).node;
+    const target = block instanceof HTMLElement ? block : block.parentElement;
+    target?.scrollIntoView({ block: 'nearest' });
   };
   append.addEventListener('mousedown', event => event.preventDefault());
-  append.addEventListener('click', addBlock);
+  append.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); addBlock(true); });
   dom.addEventListener('mousedown', event => { if (event.target === dom) event.preventDefault(); });
   dom.addEventListener('click', event => { if (event.target === dom) addBlock(); });
   return {
