@@ -21,3 +21,8 @@ Design sources and research limitations are recorded in [Notion columns and size
 - Build log and private container metadata: `/home/ubuntu/workweave/backups/20261016-column-layout/`.
 
 Existing browser tabs need a refresh. A rollback uses the retained previous container with the same database mount. Existing browser drafts retain the additional attributes until a version supporting them reopens them.
+
+
+## Retention policy updated later on 2026-10-16
+
+At the user's request, the stopped rollback containers, old images/releases, transfer archives and build/configuration backups described above were retired after the release was healthy and source was pushed. The active release remains in place. Database snapshots are kept separately under `/home/ubuntu/workweave/database-backups/`; rebuild older code from Git instead of using the historical rollback commands. See [current cleanup policy](../../README.md#发布产物保留策略).

@@ -109,3 +109,20 @@ feedmob_note/
 - 尺寸保存在日志 JSON 和本地草稿中；一次拖动只产生一次可撤销的修改，Escape 取消当前拖动。文字块的高度由内容和列宽自然决定。
 
 设计依据：Notion 的 [分栏说明](https://www.notion.com/help/columns-headings-and-dividers) 与 [媒体尺寸说明](https://www.notion.com/help/images-files-and-media)。
+
+
+## 发布产物保留策略
+
+代码先 commit 并 push，发布成功后，服务器仅保留当前运行的 Minework 镜像与对应源码目录。旧回退容器、旧镜像、旧源码、上传包和构建备份均清理；恢复历史版本时从 Git 中重建。日志数据库、当前运行配置和独立的数据库快照保留，凭据与业务数据不进入 Git。
+
+将 [清理脚本](scripts/cleanup-releases.py) 放到服务器 `/home/ubuntu/workweave/cleanup-releases.py`：
+
+```bash
+# 先查看计划
+python3 /home/ubuntu/workweave/cleanup-releases.py
+
+# 发布完成、确认当前服务正常后执行
+sudo python3 /home/ubuntu/workweave/cleanup-releases.py --apply
+```
+
+附加 `--prune-build-cache` 可清理 Docker 共享构建器中未使用的构建缓存，不删除其他应用的镜像、容器或数据卷。下一次构建可能需要重新下载依赖。
