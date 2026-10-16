@@ -1,122 +1,103 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import {
-  PenSquare,
-  Activity,
-  Calendar,
-  Hash,
-  PanelLeftClose,
-} from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { PenSquare, Activity, CalendarDays, Hash, PanelLeftClose, Users, X } from 'lucide-react';
 import { useCurrentUser } from '@/lib/user-context';
+import { MineworkMark } from '@/components/brand/MineworkMark';
 
+const navItems = [
+  { label: '工作日志', href: '/', icon: PenSquare },
+  { label: '团队动态', href: '/stream', icon: Activity },
+  { label: '日志日历', href: '/calendar', icon: CalendarDays },
+  { label: '项目标签', href: '/tags', icon: Hash },
+];
 
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
-  const { currentUser, teams, isSidebarCollapsed, toggleSidebar } = useCurrentUser();
+  const router = useRouter();
+  const { currentUser, teams, selectedTeamId, setSelectedTeamId, isSidebarCollapsed, toggleSidebar, isMobileSidebarOpen, setMobileSidebarOpen } = useCurrentUser();
+  const drawerRef = useRef<HTMLElement>(null);
 
-  const navItems = [
-    {
-      label: '今日速填 (Today)',
-      href: '/',
-      icon: PenSquare,
-      description: '记录与提交当天日志',
-    },
-    {
-      label: '团队时序流 (Stream)',
-      href: '/stream',
-      icon: Activity,
-      description: '实时聚合团队动态与卡点',
-    },
-    {
-      label: '时间线日历 (Timeline)',
-      href: '/calendar',
-      icon: Calendar,
-      description: '按月按周回溯与补填',
-    },
-    {
-      label: '标签矩阵 (Matrix)',
-      href: '/tags',
-      icon: Hash,
-      description: '跨人跨周期项目追踪',
-    },
-  ];
+  useEffect(() => { setMobileSidebarOpen(false); }, [pathname, setMobileSidebarOpen]);
 
-  if (isSidebarCollapsed) {
-    return null;
-  }
+  useEffect(() => {
+    if (!isMobileSidebarOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    drawerRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setMobileSidebarOpen(false); }
+      if (event.key === 'Tab') {
+        const controls = drawerRef.current?.querySelectorAll<HTMLElement>('a[href], button, input, select, [tabindex="0"]');
+        if (!controls?.length) return;
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    const closeOnDesktop = () => { if (window.matchMedia('(min-width: 768px)').matches) setMobileSidebarOpen(false); };
+    document.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('resize', closeOnDesktop);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('resize', closeOnDesktop);
+      previousFocus?.focus();
+    };
+  }, [isMobileSidebarOpen, setMobileSidebarOpen]);
 
-  return (
-    <aside className="w-64 lg:w-72 border-r border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/60 flex flex-col justify-between p-4 shrink-0 hidden md:flex min-h-[calc(100vh-4rem)] transition-all duration-200">
-      <div className="flex flex-col gap-6">
-        {/* Sidebar Header with Collapse Button */}
-        <div className="flex items-center justify-between px-2 pt-1">
-          <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-            多维视图导航
-          </span>
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
-            title="收起侧边栏 (Alt+\ 或点击)"
-          >
-            <PanelLeftClose className="w-4 h-4" />
-          </button>
-        </div>
+  const selectTeam = (teamId: string | null) => {
+    setSelectedTeamId(teamId);
+    if (pathname === '/') router.push('/stream');
+    setMobileSidebarOpen(false);
+  };
 
-        {/* Navigation Items */}
-        <nav className="flex flex-col gap-1.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition ${
-                  isActive
-                    ? 'bg-emerald-600 text-white shadow-xs shadow-emerald-600/30'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100'
-                }`}
-              >
-                <Icon className={`w-4.5 h-4.5 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-
-        {/* Quick Teams List (if any) */}
-        {teams.length > 0 && (
-          <div>
-            <div className="px-2 mb-2 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-              业务与研发小组
-            </div>
-            <div className="flex flex-col gap-1">
-              {teams.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between px-3 py-2 rounded-xl text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-medium"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full"
-                      style={{ backgroundColor: t.color || '#3b82f6' }}
-                    />
-                    <span>{t.name}</span>
-                  </div>
-                  <span className="text-xs text-slate-400 font-normal">活跃</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+  const content = (mobile: boolean) => (
+    <>
+      <div className="flex h-14 items-center justify-between gap-2 px-4">
+        <Link href="/" className="flex min-w-0 items-center gap-2.5 rounded text-sm font-semibold" onClick={() => setMobileSidebarOpen(false)}>
+          <MineworkMark className="h-7 w-7 shrink-0" />
+          <span>Minework<span className="ml-1.5 font-normal text-[var(--muted-foreground)]">日志</span></span>
+        </Link>
+        <button type="button" onClick={mobile ? () => setMobileSidebarOpen(false) : toggleSidebar} aria-label={mobile ? '关闭导航' : '收起导航'} title={mobile ? '关闭导航' : '收起导航（Alt + \\）'} className="flex min-h-9 min-w-9 items-center justify-center rounded text-[var(--muted-foreground)] transition-colors hover:bg-[var(--sidebar-accent)] hover:text-[var(--foreground)]">
+          {mobile ? <X size={17} /> : <PanelLeftClose size={17} />}
+        </button>
       </div>
-
-    </aside>
+      <div className="flex-1 overflow-y-auto px-2.5 pb-6 pt-3">
+        <p className="mb-2 px-2.5 text-xs font-medium text-[var(--muted-foreground)]">工作区</p>
+        <nav aria-label="主要导航" className="flex flex-col gap-0.5">
+          {navItems.map(({ label, href, icon: Icon }) => (
+            <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined} onClick={() => setMobileSidebarOpen(false)} className={`flex min-h-10 items-center gap-2.5 rounded px-2.5 text-sm transition-colors ${pathname === href ? 'bg-[var(--sidebar-accent)] font-medium text-[var(--foreground)]' : 'text-[var(--muted-foreground)] hover:bg-[var(--sidebar-accent)] hover:text-[var(--foreground)]'}`}>
+              <Icon size={17} strokeWidth={1.6} aria-hidden="true" /><span>{label}</span>
+            </Link>
+          ))}
+        </nav>
+        {teams.length > 0 && <section className="mt-8" aria-label="按团队查看日志">
+          <p className="mb-2 px-2.5 text-xs font-medium text-[var(--muted-foreground)]">团队</p>
+          <button type="button" onClick={() => selectTeam(null)} aria-pressed={selectedTeamId === null} className={`flex min-h-10 w-full items-center gap-2.5 rounded px-2.5 text-left text-sm transition-colors hover:bg-[var(--sidebar-accent)] ${selectedTeamId === null ? 'text-[var(--foreground)] font-medium' : 'text-[var(--muted-foreground)]'}`}>
+            <Users size={16} strokeWidth={1.6} aria-hidden="true" />全部团队
+          </button>
+          {teams.map(team => <button key={team.id} type="button" onClick={() => selectTeam(team.id)} aria-pressed={selectedTeamId === team.id} className={`flex min-h-10 w-full items-center gap-2.5 rounded px-2.5 text-left text-sm transition-colors hover:bg-[var(--sidebar-accent)] ${selectedTeamId === team.id ? 'bg-[var(--sidebar-accent)] text-[var(--foreground)] font-medium' : 'text-[var(--muted-foreground)]'}`}>
+            <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: team.color || 'var(--muted-foreground)' }} /><span className="truncate">{team.name}</span>
+          </button>)}
+        </section>}
+      </div>
+      <div className="mx-4 flex items-center gap-2.5 border-t border-[var(--border)] py-4 text-xs text-[var(--muted-foreground)]">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-[var(--sidebar-accent)] font-medium text-[var(--foreground)]">{currentUser?.name?.[0] || 'M'}</span>
+        <div className="min-w-0"><p className="truncate text-[var(--foreground)]">{currentUser?.name || '个人工作区'}</p><p className="mt-0.5 truncate">{currentUser?.title || '记录每一天的进展'}</p></div>
+      </div>
+    </>
   );
+
+  return <>
+    {!isSidebarCollapsed && <aside id="workspace-sidebar" aria-label="工作区导航" className="sticky top-0 hidden h-dvh w-[232px] shrink-0 flex-col border-r border-[var(--border)] bg-[var(--sidebar-background)] md:flex">{content(false)}</aside>}
+    {isMobileSidebarOpen && <div className="fixed inset-0 z-50 md:hidden">
+      <div aria-hidden="true" className="absolute inset-0 bg-black/25" onClick={() => setMobileSidebarOpen(false)} />
+      <aside ref={drawerRef} id="mobile-workspace-sidebar" role="dialog" aria-modal="true" aria-label="工作区导航" className="relative flex h-dvh w-[min(290px,85vw)] flex-col border-r border-[var(--border)] bg-[var(--sidebar-background)] shadow-xl">{content(true)}</aside>
+    </div>}
+  </>;
 };
-
-

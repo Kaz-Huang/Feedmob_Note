@@ -2,7 +2,7 @@ import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import type { NodeViewProps } from '@tiptap/react';
 import React, { useRef, useState, useEffect } from 'react';
-import { Palette, Trash2, Undo, Download, PenTool, Square, Circle, MoveRight } from 'lucide-react';
+import { Palette, Trash2, Undo, PenTool, Square, MoveRight } from 'lucide-react';
 
 const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -120,21 +120,23 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
   };
 
   return (
-    <NodeViewWrapper contentEditable={false} className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-white dark:bg-slate-900 shadow-xs">
+    <NodeViewWrapper contentEditable={false} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--background)]">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--muted)] text-sm text-[var(--foreground)] border-b border-[var(--border)]">
         <div className="flex items-center gap-2">
-          <Palette className="w-4 h-4 text-emerald-600" />
-          <span className="font-semibold text-slate-800 dark:text-slate-200">交互草图白板 (Whiteboard)</span>
+          <Palette className="w-4 h-4 text-[var(--muted-foreground)]" />
+          <span className="font-medium text-[var(--foreground)]">草图白板</span>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {/* Tool selector */}
-          <div className="flex items-center bg-white dark:bg-slate-700 rounded-lg p-0.5 border border-slate-200 dark:border-slate-600">
+          <div className="flex items-center bg-[var(--background)] rounded p-0.5 border border-[var(--border)]">
             <button
               type="button"
               onClick={() => setTool('pen')}
-              className={`p-1.5 rounded-md ${tool === 'pen' ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300' : 'text-slate-600 dark:text-slate-300'}`}
+              className={`p-1.5 rounded-md ${tool === 'pen' ? 'bg-[var(--selection)] text-[var(--accent)] ' : 'text-[var(--foreground)] '}`}
+              aria-label="画笔"
+              aria-pressed={tool === 'pen'}
               title="画笔"
             >
               <PenTool className="w-3.5 h-3.5" />
@@ -142,7 +144,9 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
             <button
               type="button"
               onClick={() => setTool('rect')}
-              className={`p-1.5 rounded-md ${tool === 'rect' ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300' : 'text-slate-600 dark:text-slate-300'}`}
+              className={`p-1.5 rounded-md ${tool === 'rect' ? 'bg-[var(--selection)] text-[var(--accent)] ' : 'text-[var(--foreground)] '}`}
+              aria-label="矩形"
+              aria-pressed={tool === 'rect'}
               title="矩形"
             >
               <Square className="w-3.5 h-3.5" />
@@ -150,7 +154,9 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
             <button
               type="button"
               onClick={() => setTool('arrow')}
-              className={`p-1.5 rounded-md ${tool === 'arrow' ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300' : 'text-slate-600 dark:text-slate-300'}`}
+              className={`p-1.5 rounded-md ${tool === 'arrow' ? 'bg-[var(--selection)] text-[var(--accent)] ' : 'text-[var(--foreground)] '}`}
+              aria-label="箭头"
+              aria-pressed={tool === 'arrow'}
               title="箭头"
             >
               <MoveRight className="w-3.5 h-3.5" />
@@ -164,18 +170,20 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
                 key={c}
                 type="button"
                 onClick={() => setColor(c)}
-                className={`w-4 h-4 rounded-full border ${color === c ? 'ring-2 ring-emerald-500' : ''}`}
+                aria-label={`画笔颜色 ${c}`}
+                aria-pressed={color === c}
+                className={`w-5 h-5 rounded-full border border-[var(--border)] ${color === c ? 'ring-2 ring-[var(--accent)]' : ''}`}
                 style={{ backgroundColor: c }}
               />
             ))}
           </div>
 
-          <button type="button" onClick={() => editor.commands.undo()} title="撤销" className="p-1.5 text-slate-500"><Undo className="w-4 h-4" /></button>
+          <button type="button" onClick={() => editor.commands.undo()} aria-label="撤销白板操作" title="撤销" className="p-1.5 text-[var(--muted-foreground)]"><Undo className="w-4 h-4" /></button>
           <button
             type="button"
             onClick={clearCanvas}
-            className="p-1.5 text-slate-400 hover:text-red-500 transition rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700"
-            title="清空白板"
+            className="p-1.5 text-[var(--muted-foreground)] hover:text-red-500 transition rounded hover:bg-[var(--muted)]"
+            aria-label="清空白板" title="清空白板"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -184,9 +192,10 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
 
 
       {/* Canvas Area */}
-      <div className="p-2 flex justify-center bg-slate-50 dark:bg-slate-950 overflow-x-auto">
+      <div className="p-2 flex min-w-0 justify-center bg-[var(--muted)] overflow-x-auto">
         <canvas
           ref={canvasRef}
+          aria-label="草图绘画区域"
           width={960}
           height={280}
           onPointerDown={startDraw}
@@ -194,7 +203,7 @@ const WhiteboardComponent = ({ node, updateAttributes, editor }: NodeViewProps) 
           onPointerUp={stopDraw}
           onPointerCancel={stopDraw}
           style={{ touchAction: 'none' }}
-          className="border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl cursor-crosshair shadow-inner max-w-full"
+          className="border border-dashed border-[var(--border)] bg-[var(--background)] rounded-md cursor-crosshair max-w-full h-auto"
         />
       </div>
     </NodeViewWrapper>

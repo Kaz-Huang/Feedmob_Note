@@ -102,3 +102,123 @@ test('selection toolbar applies formatting to selected text without adding a blo
     assert.equal(app.editor.getText(), 'format me');
   } finally { await app.close(); localStorage.clear(); }
 });
+
+test('the drag handle preserves native mousedown and starts an editor-scoped block drag', async () => {
+  localStorage.clear();
+  const app = await mount(async () => {});
+  const previous = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  try {
+    await act(async () => { app.editor.commands.insertContent('drag me'); });
+    const paragraph = app.container.querySelector('.tiptap p')!;
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => paragraph });
+    await act(async () => {
+      paragraph.dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    const grip = app.container.querySelector<HTMLButtonElement>('button[aria-label="块操作菜单"]');
+    assert.ok(grip);
+    const down = new window.MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    await act(async () => { grip.dispatchEvent(down); });
+    assert.equal(down.defaultPrevented, false, 'preventing mousedown blocks native HTML drag initiation');
+    const transfer = { values: new Map<string, string>(), setData(type: string, value: string) { this.values.set(type, value); }, setDragImage() {}, effectAllowed: '' };
+    const drag = new window.Event('dragstart', { bubbles: true, cancelable: true });
+    Object.defineProperty(drag, 'dataTransfer', { value: transfer });
+    await act(async () => { grip.dispatchEvent(drag); });
+    const { getDraggedBlockPos } = await import('../src/components/editor/utils/block-drag');
+    assert.equal(getDraggedBlockPos(app.editor.view), 0);
+    assert.equal(transfer.values.get('application/x-feedmob-block'), '0');
+    assert.equal(transfer.effectAllowed, 'move');
+  } finally {
+    if (previous) Object.defineProperty(document, 'elementFromPoint', previous);
+    else delete (document as any).elementFromPoint;
+    await app.close(); localStorage.clear();
+  }
+});
+
+test('the right empty column can be deleted from its actual block menu, persists to the draft and undoes once', async () => {
+  localStorage.clear();
+  const id = 'test:delete-empty-column';
+  const app = await mount(async () => {}, id);
+  const previous = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  const paragraph = (text = '') => ({ type: 'paragraph', ...(text ? { content: [{ type: 'text', text }] } : {}) });
+  try {
+    await act(async () => {
+      app.editor.commands.setContent({ type: 'doc', content: [
+        { type: 'columnList', content: [
+          { type: 'column', content: [paragraph('keep left')] },
+          { type: 'column', content: [paragraph()] },
+        ] }, paragraph('keep after'),
+      ] }, true);
+    });
+    const before = app.editor.getJSON();
+    const empty = app.container.querySelectorAll('[data-type="column"]')[1].querySelector('p')!;
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => empty });
+    await act(async () => { empty.dispatchEvent(new window.MouseEvent('mousemove', { bubbles: true, clientX: 10, clientY: 10 })); });
+    const menu = app.container.querySelector<HTMLButtonElement>('[aria-label="块操作菜单"]');
+    assert.ok(menu);
+    await act(async () => { menu.click(); });
+    const remove = Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="块操作"] button')).find(button => button.textContent === '删除块');
+    assert.ok(remove);
+    await act(async () => { remove.click(); await tick(); });
+    assert.deepEqual(app.editor.getJSON().content, [paragraph('keep left'), paragraph('keep after')]);
+    assert.equal(app.container.querySelector('[data-type="column-list"]'), null);
+    const draft = JSON.parse(localStorage.getItem('feedmob-draft:' + id)!);
+    assert.deepEqual(draft.contentJson, app.editor.getJSON());
+    await act(async () => { app.editor.commands.undo(); });
+    assert.deepEqual(app.editor.getJSON(), before);
+  } finally {
+    if (previous) Object.defineProperty(document, 'elementFromPoint', previous);
+    else delete (document as any).elementFromPoint;
+    await app.close();
+    localStorage.clear();
+  }
+});
+
+test('a gutter preview commits the same column drop and releases the handle for further editing', async () => {
+  localStorage.clear();
+  const app = await mount(async () => {}, 'gutter-drop');
+  const previous = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  const rect = (el: HTMLElement, x: number, y: number, width: number, height: number) => {
+    el.getBoundingClientRect = () => ({ left:x, right:x+width, top:y, bottom:y+height, width, height, x, y, toJSON:()=>({}) });
+  };
+  try {
+    await act(async () => { app.editor.commands.setContent({type:'doc',content:['A','B','C','D'].map(text=>({type:'paragraph',content:[{type:'text',text}]}))}); });
+    const before = app.editor.getJSON();
+    const body = app.container.querySelector<HTMLElement>('.document-body')!;
+    const paragraphs = app.container.querySelectorAll<HTMLElement>('.tiptap p');
+    rect(body, 50, 80, 1100, 400); rect(app.editor.view.dom, 100, 100, 1000, 360);
+    paragraphs.forEach((el,i)=>rect(el,100,100+i*60,1000,40));
+    Object.defineProperty(document,'elementFromPoint',{configurable:true,value:()=>paragraphs[2]});
+    await act(async () => { paragraphs[2].dispatchEvent(new window.MouseEvent('mousemove',{bubbles:true,clientX:500,clientY:240})); });
+    const grip = app.container.querySelector<HTMLButtonElement>('[aria-label="块操作菜单"]')!;
+    assert.ok(grip);
+    const transfer = {setData(){},setDragImage(){},effectAllowed:'',dropEffect:''};
+    const event = (type:string,x:number,y:number) => {
+      const e = new window.Event(type,{bubbles:true,cancelable:true});
+      Object.defineProperties(e,{clientX:{value:x},clientY:{value:y},dataTransfer:{value:transfer}});
+      return e;
+    };
+    await act(async()=>{grip.dispatchEvent(event('dragstart',80,240));});
+    Object.defineProperty(document,'elementFromPoint',{configurable:true,value:()=>body});
+    await act(async()=>{body.dispatchEvent(event('dragover',76,120));});
+    assert.equal(app.container.querySelector('[data-testid="block-drop-indicator"]')?.getAttribute('data-zone'),'left');
+    assert.match(app.container.querySelector('[data-testid="block-drop-label"]')?.textContent ?? '',/左侧并排成列/);
+    const dropEvent = event('drop',76,120);
+    await act(async()=>{body.dispatchEvent(dropEvent);});
+    assert.equal(dropEvent.defaultPrevented,true);
+    const row = app.editor.state.doc.firstChild!;
+    assert.equal(row.type.name,'columnList');
+    assert.deepEqual([row.child(0).textContent,row.child(1).textContent],['C','A']);
+    assert.equal(app.editor.state.doc.lastChild!.textContent,'D');
+    assert.equal(app.container.querySelector('[data-testid="block-drop-indicator"]'),null);
+    assert.equal(app.container.querySelector('.feedmob-drag-source-active'),null);
+    await act(async()=>{app.editor.commands.undo();});
+    assert.deepEqual(app.editor.getJSON(),before);
+    const next = app.container.querySelectorAll<HTMLElement>('.tiptap p')[1];
+    Object.defineProperty(document,'elementFromPoint',{configurable:true,value:()=>next});
+    await act(async()=>{next.dispatchEvent(new window.MouseEvent('mousemove',{bubbles:true,clientX:500,clientY:170}));});
+    assert.ok(app.container.querySelector('[data-block-handle]'),'drop must not leave isDragging stuck');
+  } finally {
+    if(previous) Object.defineProperty(document,'elementFromPoint',previous); else delete (document as any).elementFromPoint;
+    await app.close(); localStorage.clear();
+  }
+});

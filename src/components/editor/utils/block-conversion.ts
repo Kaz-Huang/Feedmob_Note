@@ -3,13 +3,13 @@ import { TextSelection } from '@tiptap/pm/state';
 
 export const BLOCK_TYPES = [
   ['paragraph', '文本'], ['heading1', '一级标题'], ['heading2', '二级标题'], ['heading3', '三级标题'],
-  ['bulletList', '无序列表'], ['orderedList', '有序列表'], ['taskList', '待办清单'], ['blockquote', '引用'], ['callout', '提示块'], ['codeBlock', '代码块'],
+  ['bulletList', '无序列表'], ['orderedList', '有序列表'], ['taskList', '待办清单'], ['blockquote', '引用'], ['callout', '提示块'], ['toggle', '折叠列表'], ['codeBlock', '代码块'],
 ] as const;
 export type BlockType = typeof BLOCK_TYPES[number][0] | 'columns';
 
 export function canConvertBlock(editor: Editor, pos: number): boolean {
   const node = editor.state.doc.nodeAt(pos);
-  return !!node && (node.isTextblock || ['listItem', 'taskItem'].includes(node.type.name));
+  return !!node && (node.isTextblock || (['listItem', 'taskItem', 'toggle', 'callout', 'blockquote'].includes(node.type.name) && !!node.firstChild?.isTextblock));
 }
 
 // Convert only the selected item, keeping neighbouring list items and all
@@ -17,23 +17,33 @@ export function canConvertBlock(editor: Editor, pos: number): boolean {
 export function convertBlock(editor: Editor, pos: number, type: BlockType, range?: { from: number; to: number }): boolean {
   if (!canConvertBlock(editor, pos)) return false;
   const { state, view } = editor;
+  const original = state.doc.nodeAt(pos)!;
+  if (range && (range.from < pos || range.to < range.from || range.to > pos + original.nodeSize)) return false;
   const { schema } = state;
   const tr = state.tr;
   if (range) tr.delete(range.from, range.to);
   const node = tr.doc.nodeAt(pos)!;
   const item = ['listItem', 'taskItem'].includes(node.type.name);
-  const textBlock = item ? node.firstChild! : node;
+  const container = !node.isTextblock;
+  const textBlock = container ? node.firstChild! : node;
   const paragraph = schema.nodes.paragraph.create(null, textBlock.content);
-  const trailing = item ? Array.from({ length: node.childCount - 1 }, (_, i) => node.child(i + 1)) : [];
+  const trailing = container ? Array.from({ length: node.childCount - 1 }, (_, i) => node.child(i + 1)) : [];
   try {
     let converted;
     let siblings = trailing;
     if (type === 'columns') {
-      const source = item ? tr.doc.resolve(pos).parent.type.createChecked(tr.doc.resolve(pos).parent.attrs, [node]) : node;
+      const $pos = tr.doc.resolve(pos);
+      const attrs = $pos.parent.type.name === 'orderedList'
+        ? { ...$pos.parent.attrs, start: ($pos.parent.attrs.start ?? 1) + $pos.index() }
+        : $pos.parent.attrs;
+      const source = item ? $pos.parent.type.createChecked(attrs, [node]) : node;
       converted = schema.nodes.columnList.createChecked({ columns: 2 }, [
         schema.nodes.column.createChecked(null, [source]),
         schema.nodes.column.createChecked(null, [schema.nodes.paragraph.create()]),
       ]);
+      siblings = [];
+    } else if (type === 'toggle') {
+      converted = schema.nodes.toggle.createChecked({ collapsed: false }, [paragraph, ...trailing, ...(trailing.length ? [] : [schema.nodes.paragraph.create()])]);
       siblings = [];
     } else if (type.startsWith('heading')) converted = schema.nodes.heading.createChecked({ level: Number(type.slice(-1)) }, textBlock.content);
     else if (type === 'paragraph') converted = paragraph;

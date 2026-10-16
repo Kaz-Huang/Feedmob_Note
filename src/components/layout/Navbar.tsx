@@ -1,241 +1,111 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import { signOut } from 'next-auth/react';
 import { useCurrentUser } from '@/lib/user-context';
-import { User } from '@/types';
-import {
-  FileText,
-  Users,
-  Search,
-  Sparkles,
-  ChevronDown,
-  Moon,
-  Sun,
-  ShieldCheck,
-  Briefcase,
-  PanelLeftOpen,
-  PanelLeftClose,
-} from 'lucide-react';
+import { FileText, Search, ChevronDown, PanelLeftOpen, PanelLeftClose, Check, Loader2, LogOut } from 'lucide-react';
 import { WeeklySummaryModal } from '../views/WeeklySummaryModal';
+import { MineworkMark } from '@/components/brand/MineworkMark';
 
-interface NavbarProps {
-  onSearch?: (query: string) => void;
-}
+interface NavbarProps { onSearch?: (query: string) => void; }
+
+const pageLabels: Record<string, string> = { '/': '工作日志', '/stream': '团队动态', '/calendar': '日志日历', '/tags': '项目标签' };
 
 export const Navbar: React.FC<NavbarProps> = ({ onSearch }) => {
-  const {
-    currentUser,
-    users,
-    setCurrentUser,
-    teams,
-    selectedTeamId,
-    setSelectedTeamId,
-    isSidebarCollapsed,
-    toggleSidebar,
-  } = useCurrentUser();
+  const pathname = usePathname();
+  const { currentUser, users, setCurrentUser, teams, selectedTeamId, setSelectedTeamId, isSidebarCollapsed, toggleSidebar, isMobileSidebarOpen } = useCurrentUser();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setSearchQuery(val);
-    if (onSearch) onSearch(val);
+  useEffect(() => {
+    if (!isUserMenuOpen) return;
+    setDisplayName(currentUser?.name || '');
+    setRenameError(null);
+    nameInputRef.current?.focus();
+    const dismiss = (event: PointerEvent) => {
+      if (!profileRef.current?.contains(event.target as Node)) setIsUserMenuOpen(false);
+    };
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); setIsUserMenuOpen(false); profileButtonRef.current?.focus(); }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', keyboard);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', keyboard); };
+  }, [isUserMenuOpen, currentUser?.id]);
+
+  useEffect(() => {
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.altKey && event.key === '\\') { event.preventDefault(); toggleSidebar(); }
+    };
+    document.addEventListener('keydown', keyboard);
+    return () => document.removeEventListener('keydown', keyboard);
+  }, [toggleSidebar]);
+
+  const saveName = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentUser || isRenaming) return;
+    const name = displayName.trim();
+    if (!name) { setRenameError('请输入显示名。'); return; }
+    if (name === currentUser.name) { setIsUserMenuOpen(false); profileButtonRef.current?.focus(); return; }
+    setIsRenaming(true);
+    setRenameError(null);
+    try {
+      const response = await fetch('/api/users', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: currentUser.id, name }) });
+      if (!response.ok) throw new Error('显示名保存失败，请重试。');
+      setCurrentUser(await response.json());
+      setIsUserMenuOpen(false);
+      profileButtonRef.current?.focus();
+    } catch (error) { setRenameError(error instanceof Error ? error.message : '显示名保存失败，请重试。'); }
+    finally { setIsRenaming(false); }
   };
 
-  return (
-    <>
-      <header className="sticky top-0 z-30 flex items-center justify-between h-15 px-4 sm:px-6 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800">
-        {/* Brand & Team Switcher */}
-        <div className="flex items-center gap-3 sm:gap-5">
-          {/* Sidebar Toggle Button */}
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="p-2 rounded-xl text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            title={isSidebarCollapsed ? '展开导航侧边栏' : '收起导航侧边栏'}
-          >
-            {isSidebarCollapsed ? (
-              <PanelLeftOpen className="w-5 h-5" />
-            ) : (
-              <PanelLeftClose className="w-5 h-5" />
-            )}
+  return <>
+    <header className="sticky top-0 z-30 flex h-14 min-w-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--background)] px-3 sm:px-5">
+      <div className="flex min-w-0 items-center gap-1.5 text-sm">
+        <button type="button" onClick={toggleSidebar} aria-label="切换导航侧边栏" aria-expanded={isMobileSidebarOpen || !isSidebarCollapsed} className="flex min-h-10 min-w-10 items-center justify-center rounded text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]" title="切换导航（Alt + \\）">
+          {isSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </button>
+        <span className="hidden items-center gap-1.5 text-[var(--muted-foreground)] sm:flex"><MineworkMark className="h-5 w-5" />Minework</span>
+        <span aria-hidden="true" className="mx-1 hidden text-[var(--muted-foreground)] sm:inline">/</span>
+        <span className="truncate text-[var(--foreground)]">{pageLabels[pathname] || '工作区'}</span>
+      </div>
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        {teams.length > 0 && pathname !== '/' && <select aria-label="筛选团队" value={selectedTeamId || ''} onChange={event => setSelectedTeamId(event.target.value || null)} className="hidden min-h-9 max-w-40 cursor-pointer rounded border border-[var(--border)] bg-[var(--background)] px-2 text-xs text-[var(--muted-foreground)] sm:block">
+          <option value="">全部团队</option>{teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
+        </select>}
+        {onSearch && <div className="relative hidden w-44 lg:block"><Search size={14} aria-hidden="true" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" /><input aria-label="搜索日志" type="search" value={searchQuery} onChange={event => { setSearchQuery(event.target.value); onSearch(event.target.value); }} placeholder="搜索日志…" className="h-9 w-full rounded border border-[var(--border)] bg-[var(--background)] pl-8 pr-2 text-sm" /></div>}
+        <button type="button" onClick={() => setIsSummaryModalOpen(true)} aria-label="生成工作周报" className="flex min-h-10 items-center gap-1.5 rounded px-2.5 text-sm text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]">
+          <FileText size={15} aria-hidden="true" /><span>周报</span>
+        </button>
+        <div ref={profileRef} className="relative">
+          <button ref={profileButtonRef} type="button" onClick={() => setIsUserMenuOpen(open => !open)} aria-label={`成员设置：${currentUser?.name || '当前用户'}`} aria-haspopup="dialog" aria-expanded={isUserMenuOpen} aria-controls={isUserMenuOpen ? 'profile-settings' : undefined} className="flex min-h-10 items-center gap-1.5 rounded px-1.5 transition-colors hover:bg-[var(--muted)]">
+            <span className="flex h-7 w-7 items-center justify-center rounded bg-[var(--muted)] text-xs font-medium text-[var(--foreground)]">{currentUser?.name?.[0] || 'M'}</span>
+            <ChevronDown size={13} aria-hidden="true" className="text-[var(--muted-foreground)]" />
           </button>
-
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-emerald-600 flex items-center justify-center text-white font-black text-base shadow-sm shadow-emerald-500/20">
-              F
-            </div>
-            <div>
-              <div className="font-extrabold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <span>Feedmob WorkLog</span>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 rounded-md">
-                  极简版
-                </span>
-              </div>
-            </div>
-          </div>
-
-
-          {/* Department Filter (Only if teams exist) */}
-          {teams.length > 0 && (
-            <div className="hidden md:flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-sm">
-              <button
-                type="button"
-                onClick={() => setSelectedTeamId(null)}
-                className={`px-3 py-1.5 rounded-lg transition ${
-                  selectedTeamId === null
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 font-bold shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                }`}
-              >
-                全团队
-              </button>
-              {teams.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setSelectedTeamId(t.id)}
-                  className={`px-3 py-1.5 rounded-lg transition ${
-                    selectedTeamId === t.id
-                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 font-bold shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                >
-                  {t.name}
-                </button>
-              ))}
-            </div>
-          )}
+          {isUserMenuOpen && <div id="profile-settings" role="dialog" aria-label="成员设置" onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) setIsUserMenuOpen(false); }} className="absolute right-0 top-full mt-1 w-[min(300px,calc(100vw-24px))] rounded-md border border-[var(--border)] bg-[var(--background)] p-3 shadow-lg">
+            <p className="mb-3 px-1 text-xs font-medium text-[var(--muted-foreground)]">成员设置</p>
+            {currentUser && <form onSubmit={saveName} className="border-b border-[var(--border)] px-1 pb-4">
+              <label htmlFor="member-display-name" className="mb-1.5 block text-xs text-[var(--muted-foreground)]">显示名</label>
+              <div className="flex gap-2"><input ref={nameInputRef} id="member-display-name" value={displayName} onChange={event => setDisplayName(event.target.value)} disabled={isRenaming} aria-describedby={renameError ? 'member-name-error' : undefined} className="h-9 min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 text-sm" /><button type="submit" disabled={isRenaming} className="rounded bg-[var(--accent)] px-3 text-xs text-[var(--accent-foreground)] disabled:opacity-50">{isRenaming ? <Loader2 size={14} className="animate-spin" aria-label="正在保存" /> : '保存'}</button></div>
+              {renameError && <p id="member-name-error" role="alert" className="mt-2 text-xs text-red-600">{renameError}</p>}
+            </form>}
+            <p className="mb-1 mt-3 px-1 text-xs text-[var(--muted-foreground)]">切换成员</p>
+            <div className="max-h-64 overflow-y-auto">{users.map(user => <button key={user.id} type="button" disabled={isRenaming} onClick={() => { setCurrentUser(user); setIsUserMenuOpen(false); profileButtonRef.current?.focus(); }} className="flex min-h-11 w-full items-center gap-2.5 rounded px-2 text-left hover:bg-[var(--muted)] disabled:opacity-50">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-[var(--muted)] text-xs">{user.name[0]}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm">{user.name}</span><span className="block truncate text-xs text-[var(--muted-foreground)]">{user.title || '成员'}</span></span>{user.id === currentUser?.id && <Check size={14} aria-label="当前成员" />}
+            </button>)}</div>
+            <div className="mt-3 border-t border-[var(--border)] pt-2"><button type="button" onClick={() => void signOut({ callbackUrl: '/login' })} className="popover-row"><LogOut size={15} />退出登录</button></div>
+          </div>}
         </div>
-
-        {/* Global Search & Action Bar */}
-        <div className="flex items-center gap-3.5">
-          {/* Quick Search */}
-          <div className="relative w-52 lg:w-72">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={handleSearchChange}
-              placeholder="搜索日志、成员、卡点..."
-              className="w-full text-sm pl-9 pr-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 border-none outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800 dark:text-slate-200 placeholder:text-slate-400"
-            />
-          </div>
-
-          {/* Export Weekly Summary Button */}
-          <button
-            type="button"
-            onClick={() => setIsSummaryModalOpen(true)}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 transition"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>一键生成周报</span>
-          </button>
-
-          {/* Current User Profile Menu */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className="flex items-center gap-2.5 p-1.5 pl-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
-            >
-              <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">
-                {currentUser?.name?.[0] || 'U'}
-              </div>
-              <div className="text-left hidden sm:block">
-                <div className="text-sm font-bold text-slate-800 dark:text-slate-200 leading-tight">
-                  {currentUser?.name || '当前用户'}
-                </div>
-                <div className="text-xs text-slate-400 leading-tight">
-                  {currentUser?.title || '个人工作区'}
-                </div>
-              </div>
-              <ChevronDown className="w-4 h-4 text-slate-400" />
-            </button>
-
-            {isUserMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-80 p-3 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 z-50 animate-in fade-in zoom-in-95">
-                <div className="px-2 py-1.5 mb-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    用户空间设置
-                  </div>
-                  <span className="text-xs text-emerald-600 font-bold">已连接本地库</span>
-                </div>
-
-                {/* Current User Quick Edit */}
-                {currentUser && (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl mb-2 flex flex-col gap-2">
-                    <div className="text-xs text-slate-500 font-medium">当前昵称 / 显示名：</div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        defaultValue={currentUser.name}
-                        onBlur={async (e) => {
-                          const newName = e.target.value.trim();
-                          if (newName && newName !== currentUser.name) {
-                            try {
-                              const res = await fetch('/api/users', {
-                                method: 'PATCH',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ id: currentUser.id, name: newName }),
-                              });
-                              if (res.ok) {
-                                const updated = await res.json();
-                                setCurrentUser(updated);
-                              }
-                            } catch (err) {
-                              console.error(err);
-                            }
-                          }
-                        }}
-                        placeholder="输入您的昵称..."
-                        className="flex-1 text-sm font-semibold px-3 py-1.5 rounded-lg bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-emerald-500"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Other Users List (if multiple) */}
-                {users.length > 1 && (
-                  <div className="py-1 flex flex-col gap-1">
-                    <div className="text-xs text-slate-400 px-2 py-1">切换其他成员：</div>
-                    {users
-                      .filter((u) => u.id !== currentUser?.id)
-                      .map((u) => (
-                        <button
-                          key={u.id}
-                          type="button"
-                          onClick={() => {
-                            setCurrentUser(u);
-                            setIsUserMenuOpen(false);
-                          }}
-                          className="flex items-center gap-3 px-3 py-2 rounded-xl text-left transition hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300"
-                        >
-                          <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-semibold">
-                            {u.name[0]}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-semibold truncate">{u.name}</div>
-                            <div className="text-xs text-slate-400 truncate">{u.title || '成员'}</div>
-                          </div>
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-
-
-      {/* Weekly Summary Modal */}
-      <WeeklySummaryModal
-        isOpen={isSummaryModalOpen}
-        onClose={() => setIsSummaryModalOpen(false)}
-      />
-    </>
-  );
+      </div>
+    </header>
+    <WeeklySummaryModal isOpen={isSummaryModalOpen} onClose={() => setIsSummaryModalOpen(false)} />
+  </>;
 };

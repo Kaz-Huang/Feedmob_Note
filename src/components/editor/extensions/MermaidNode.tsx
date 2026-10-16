@@ -59,21 +59,21 @@ const MermaidComponent = ({ node, updateAttributes }: NodeViewProps) => {
   };
 
   return (
-    <NodeViewWrapper contentEditable={false} className="my-4 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900 shadow-xs">
+    <NodeViewWrapper contentEditable={false} className="my-4 border border-[var(--border)] rounded-md overflow-hidden bg-[var(--muted)]">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800 text-sm text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
-        <div className="flex items-center gap-2 font-semibold">
-          <GitGraph className="w-4 h-4 text-indigo-500" />
-          <span>Mermaid 架构/时序图表</span>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--muted)] text-sm text-[var(--foreground)] border-b border-[var(--border)]">
+        <div className="flex items-center gap-2 font-medium">
+          <GitGraph className="w-4 h-4 text-[var(--muted-foreground)]" />
+          <span>Mermaid 图表</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setIsEditing(!isEditing)}
-            className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition ${
+            className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1.5 transition ${
               isEditing
-                ? 'bg-white dark:bg-slate-700 text-indigo-600 font-bold shadow-xs'
-                : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
+                ? 'bg-[var(--background)]  text-[var(--muted-foreground)] font-medium '
+                : 'hover:bg-[var(--muted)]  text-[var(--foreground)] '
             }`}
           >
             {isEditing ? <Eye className="w-3.5 h-3.5" /> : <Code2 className="w-3.5 h-3.5" />}
@@ -86,25 +86,26 @@ const MermaidComponent = ({ node, updateAttributes }: NodeViewProps) => {
       {isEditing ? (
         <div className="p-4">
           <textarea
+            aria-label="Mermaid 图表源码"
             value={code}
             onChange={handleCodeChange}
             rows={5}
             placeholder="输入 Mermaid 语法，如 graph TD ..."
-            className="w-full font-mono text-sm bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 p-3 rounded-lg border border-slate-200 dark:border-slate-800 outline-none focus:ring-1 focus:ring-indigo-500 leading-relaxed"
+            className="w-full font-mono text-sm bg-[var(--background)] text-[var(--foreground)] p-3 rounded border border-[var(--border)] outline-none focus:ring-1 focus:ring-[var(--accent)] leading-relaxed"
           />
         </div>
       ) : (
         <div
           ref={containerRef}
-          className="p-5 flex flex-col items-center justify-center bg-white dark:bg-slate-950 min-h-[140px] overflow-x-auto"
+          className="p-4 flex min-w-0 flex-col items-center justify-center bg-[var(--background)] min-h-[140px] overflow-x-auto"
         >
           {error ? (
-            <div className="text-red-500 text-sm p-3 bg-red-50 dark:bg-red-950/40 rounded-lg border border-red-200">
+            <div className="text-red-500 text-sm p-3 bg-red-50 dark:bg-red-950/40 rounded border border-red-200">
               {error}
             </div>
           ) : (
             <div
-              className="mermaid-output flex justify-center max-w-full"
+              className="mermaid-output flex min-w-0 justify-center max-w-full"
               dangerouslySetInnerHTML={{ __html: svg }}
             />
           )}

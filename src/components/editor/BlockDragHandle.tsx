@@ -1,6 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { selectBlockAt } from './extensions/BlockSelection';
+import { findBlockAtPoint, blockHandleAnchor } from './utils/block-dom';
 import { startBlockDrag, getDraggedBlockPos, endBlockDrag } from './utils/block-drag';
 import { BLOCK_TYPES, canConvertBlock, convertBlock, type BlockType } from './utils/block-conversion';
 import { Editor } from '@tiptap/react';
@@ -12,7 +15,6 @@ import {
   Trash2,
   Plus,
   Columns,
-  Sparkles,
   Rows,
 } from 'lucide-react';
 import {
@@ -23,9 +25,12 @@ import {
   turnBlockIntoColumns,
   resolveDomBlockPos,
   computeBlockDropTarget,
+  moveBlockToDropTarget,
+  type BlockDropTarget,
   getEnclosingColumnList,
   unwrapColumnList,
   BLOCK_DRAG_MIME,
+  getBlockPosFromSelection,
 } from './utils/block-movement';
 
 interface BlockDragHandleProps {
@@ -42,11 +47,10 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
   const [handleLeft, setHandleLeft] = useState<number>(8);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeDomNode, setActiveDomNode] = useState<HTMLElement | null>(null);
-  const [hoveredButton, setHoveredButton] = useState<'plus' | 'grip' | null>(null);
-  const [isAltPressed, setIsAltPressed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState({ left: 8, top: 8 });
   const handleRef = useRef<HTMLDivElement>(null);
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -58,201 +62,145 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     width: number;
     height: number;
     isVertical: boolean;
+    zone: BlockDropTarget['zone'];
+    label: string;
+    highlight: { top: number; left: number; width: number; height: number };
   } | null>(null);
 
   // Resolve the block position of the currently hovered DOM node.
   // Handles every block kind uniformly (text blocks, atoms like mermaid,
-  // whole column rows when hovering the gap between columns).
+  // nested blocks and the title of a toggle/callout).
   const getActiveBlockPos = (): number | null => {
     if (!activeDomNode || !editor?.view) return null;
     return resolveDomBlockPos(editor.view, activeDomNode);
   };
 
-  // Track Alt key press for Notion tooltip toggle
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') setIsAltPressed(true);
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Alt') setIsAltPressed(false);
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
-
-  // Track mouse position over editor blocks with robust boundary & hover detection
+  // Hover, caret anchoring and drag targets all address the same logical block.
   useEffect(() => {
     const container = editorContainerRef.current;
     if (!container || !editor) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isMenuOpen || isDragging) return; // Freeze position when menu or dragging is active
-
-      // If mouse is currently inside the handle element, do not calculate or hide
-      if (handleRef.current && handleRef.current.contains(e.target as Node)) {
-        if (hideTimeoutRef.current) {
-          clearTimeout(hideTimeoutRef.current);
-          hideTimeoutRef.current = null;
-        }
-        return;
-      }
-
-      const editorDom = container.querySelector('.tiptap');
-      if (!editorDom) return;
-
-      const element = document.elementFromPoint(e.clientX, e.clientY);
-      if (!element || !editorDom.contains(element)) {
-        // Mouse left the editor blocks (title, padding…): hide the handle
-        // instead of leaving it parked next to the last hovered block.
-        if (activeDomNode && !hideTimeoutRef.current) {
-          hideTimeoutRef.current = setTimeout(() => { setActiveDomNode(null); setHandleTop(null); hideTimeoutRef.current = null; }, 250);
-        }
-        return;
-      }
-
-      // Check if element is inside a column: [data-type="column"]
-      const columnEl = element.closest('[data-type="column"]');
-      let current: HTMLElement | null = element as HTMLElement;
-
-      if (columnEl && editorDom.contains(columnEl)) {
-        // Find direct child of the column (the inner block)
-        while (current && current.parentElement !== columnEl && current !== columnEl) {
-          current = current.parentElement;
-        }
-      } else {
-        // Direct child of .tiptap (top-level block)
-        while (current && current.parentElement !== editorDom) {
-          current = current.parentElement;
-        }
-      }
-
-      if (hideTimeoutRef.current) { clearTimeout(hideTimeoutRef.current); hideTimeoutRef.current = null; }
-      const listItem = element.closest('li');
-      if (listItem && editorDom.contains(listItem)) current = listItem;
-      if (current) {
-        setActiveDomNode(current);
-        const containerRect = container.getBoundingClientRect();
-        const blockRect = current.getBoundingClientRect();
-        const top = blockRect.top - containerRect.top + 2;
-
-        let left = 8;
-        // If current element is inside a column, position the handle immediately to the left of this block
-        if (columnEl && editorDom.contains(columnEl)) {
-          const colRect = columnEl.getBoundingClientRect();
-          if (colRect.left > containerRect.left + 60) {
-            left = Math.max(8, colRect.left - containerRect.left - 48);
-          }
-        }
-
-        setHandleTop(top);
-        setHandleLeft(left);
-
-        if (hideTimeoutRef.current) {
-          clearTimeout(hideTimeoutRef.current);
-          hideTimeoutRef.current = null;
-        }
-      }
+    const clearHide = () => {
+      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
     };
-
+    const hide = () => {
+      if (!hideTimeoutRef.current) hideTimeoutRef.current = setTimeout(() => {
+        setActiveDomNode(null); setHandleTop(null); hideTimeoutRef.current = null;
+      }, 180);
+    };
+    const position = (dom: HTMLElement) => {
+      const bounds = container.getBoundingClientRect();
+      const anchor = blockHandleAnchor(dom);
+      setActiveDomNode(dom);
+      setHandleTop(anchor.top - bounds.top);
+      setHandleLeft(Math.max(0, anchor.left - bounds.left));
+    };
+    const handleMouseMove = (event: MouseEvent) => {
+      if (isMenuOpen || isDragging) return;
+      if (handleRef.current?.contains(event.target as Node)) { clearHide(); return; }
+      const hit = findBlockAtPoint(editor.view, event.clientX, event.clientY);
+      if (!hit) { hide(); return; }
+      clearHide();
+      position(hit.dom);
+    };
     const handleMouseLeave = () => {
       if (isMenuOpen || isDragging) return;
-      setActiveDomNode(null);
-      setHandleTop(null);
+      hide();
     };
-
+    const reposition = () => {
+      if (!isDragging && activeDomNode?.isConnected) position(activeDomNode);
+    };
     container.addEventListener('mousemove', handleMouseMove);
     container.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    editor.on('update', reposition);
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
       container.removeEventListener('mouseleave', handleMouseLeave);
-      if (hideTimeoutRef.current) { clearTimeout(hideTimeoutRef.current); hideTimeoutRef.current = null; }
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+      editor.off('update', reposition);
+      clearHide();
     };
   }, [editor, editorContainerRef, isMenuOpen, isDragging, activeDomNode]);
 
-  // Notion-style blue drop indicator while dragging a block over the editor.
+  // Capture drops on the complete body (including each column's gutter).
+  // The same computed target supplies both the guide and the committed move.
   useEffect(() => {
     const container = editorContainerRef.current;
     if (!container || !editor) return;
-
-    const isBlockDrag = () => getDraggedBlockPos(editor.view) !== null;
-
-    const handleDragOver = (e: DragEvent) => {
-      if (!isBlockDrag()) return;
-      e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-
-      const view = editor.view;
-      const sourcePos = getDraggedBlockPos(view);
-      const dropTarget = sourcePos === null
-        ? null
-        : computeBlockDropTarget(view, e.clientX, e.clientY, { sourcePos });
-
-      const editorDom = container.querySelector('.tiptap') as HTMLElement | null;
-      if (!dropTarget || !editorDom) {
-        setDropIndicator(null);
-        return;
-      }
-
-      const containerRect = container.getBoundingClientRect();
+    let lastPoint: { x: number; y: number } | null = null;
+    const inside = (x: number, y: number) => {
+      const rect = container.getBoundingClientRect();
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+    const targetAt = (x: number, y: number) => {
+      const sourcePos = getDraggedBlockPos(editor.view);
+      return sourcePos === null || !inside(x, y) ? null : computeBlockDropTarget(editor.view, x, y, { sourcePos });
+    };
+    const showTarget = (target: BlockDropTarget | null) => {
+      if (!target) { setDropIndicator(null); return; }
+      const bounds = container.getBoundingClientRect();
+      const highlight = target.highlight ?? target.rect;
       const indicator = {
-        top: dropTarget.indicator.top - containerRect.top,
-        left: dropTarget.indicator.left - containerRect.left,
-        width: dropTarget.indicator.width,
-        height: dropTarget.indicator.height,
-        isVertical: dropTarget.indicator.isVertical,
+        ...target.indicator,
+        top: target.indicator.top - bounds.top,
+        left: target.indicator.left - bounds.left,
+        zone: target.zone,
+        label: target.label ?? '移到这里',
+        highlight: { ...highlight, top: highlight.top - bounds.top, left: highlight.left - bounds.left },
       };
-
-      setDropIndicator((prev) =>
-        prev &&
-        prev.top === indicator.top &&
-        prev.left === indicator.left &&
-        prev.width === indicator.width &&
-        prev.height === indicator.height &&
-        prev.isVertical === indicator.isVertical
-          ? prev
-          : indicator
-      );
+      setDropIndicator(prev => prev && JSON.stringify(prev) === JSON.stringify(indicator) ? prev : indicator);
     };
-
-    const handleDragLeave = (e: DragEvent) => {
-      if (!isBlockDrag()) return;
-      if (!e.relatedTarget || !container.contains(e.relatedTarget as Node)) {
-        setDropIndicator(null);
-      }
+    const handleDragOver = (event: DragEvent) => {
+      if (!dragSourceRef.current) return;
+      lastPoint = { x: event.clientX, y: event.clientY };
+      const target = targetAt(event.clientX, event.clientY);
+      showTarget(target);
+      if (inside(event.clientX, event.clientY)) event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = target ? 'move' : 'none';
     };
-
-    const handleDrop = (e: DragEvent) => {
-      // Full cleanup MUST happen here: resetting handleTop below unmounts the
-      // draggable button, so a later `dragend` may never fire. Leaving the
-      // drag state stuck would freeze the handle (it only re-appears on
-      // mousemove while !isDragging) and leak __feedmobDraggedBlockPos.
+    const refreshTarget = () => {
+      if (lastPoint) showTarget(targetAt(lastPoint.x, lastPoint.y));
+    };
+    const finishDrag = () => {
       endBlockDrag(editor.view);
-      document.querySelectorAll('.feedmob-drag-source-active').forEach((el) => {
-        el.classList.remove('feedmob-drag-source-active');
-      });
+      document.querySelectorAll('.feedmob-drag-source-active').forEach(el => el.classList.remove('feedmob-drag-source-active'));
       dragSourceRef.current = null;
-      setIsDragging(false);
-      setDropIndicator(null);
-      // The doc just changed under the pointer — the cached hover block is
-      // stale, so recompute the handle position from the next mousemove.
-      setActiveDomNode(null);
-      setHandleTop(null);
+      lastPoint = null;
+      setIsDragging(false); setDropIndicator(null);
+      setActiveDomNode(null); setHandleTop(null);
     };
-
+    const handleContainerDrop = (event: DragEvent) => {
+      if (!dragSourceRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const sourcePos = getDraggedBlockPos(editor.view);
+      const target = targetAt(event.clientX, event.clientY);
+      if (sourcePos !== null && target) moveBlockToDropTarget(editor, sourcePos, target);
+      finishDrag();
+    };
+    const handleDragLeave = (event: DragEvent) => {
+      // Child-to-child transitions often have a null relatedTarget during
+      // native dragging. Coordinates prevent a guide flicker on every block.
+      if (dragSourceRef.current && !inside(event.clientX, event.clientY)) setDropIndicator(null);
+    };
+    container.addEventListener('drop', handleContainerDrop, true);
     window.addEventListener('dragover', handleDragOver, { passive: false });
     window.addEventListener('dragleave', handleDragLeave);
-    window.addEventListener('drop', handleDrop);
-    window.addEventListener('dragend', handleDrop);
+    window.addEventListener('drop', finishDrag);
+    window.addEventListener('dragend', finishDrag);
+    window.addEventListener('scroll', refreshTarget, true);
+    window.addEventListener('resize', refreshTarget);
     return () => {
+      container.removeEventListener('drop', handleContainerDrop, true);
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('dragleave', handleDragLeave);
-      window.removeEventListener('drop', handleDrop);
-      window.removeEventListener('dragend', handleDrop);
+      window.removeEventListener('drop', finishDrag);
+      window.removeEventListener('dragend', finishDrag);
+      window.removeEventListener('scroll', refreshTarget, true);
+      window.removeEventListener('resize', refreshTarget);
       endBlockDrag(editor.view);
     };
   }, [editor, editorContainerRef]);
@@ -276,25 +224,63 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     }
   }, [isMenuOpen]);
 
+  // Also anchor the handle to the caret for keyboard and touch editing.
+  useEffect(() => {
+    if (!editor) return;
+    const anchorSelection = () => {
+      const pos = getBlockPosFromSelection(editor);
+      const dom = pos === null ? null : editor.view.nodeDOM(pos);
+      const container = editorContainerRef.current;
+      if (!(dom instanceof HTMLElement) || !container) return;
+      const bounds = container.getBoundingClientRect(), anchor = blockHandleAnchor(dom);
+      setActiveDomNode(dom);
+      setHandleTop(anchor.top - bounds.top);
+      setHandleLeft(Math.max(0, anchor.left - bounds.left));
+    };
+    const sync = () => { if (!isMenuOpen && !isDragging && editor.isFocused) anchorSelection(); };
+    const openMenu = () => {
+      anchorSelection();
+      const pos = getBlockPosFromSelection(editor);
+      if (pos !== null) selectBlockAt(editor, pos);
+      setIsMenuOpen(true);
+    };
+    const shortcut = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229 || !editor.view.dom.contains(event.target as Node)) return;
+      if ((event.ctrlKey || event.metaKey) && event.key === '/') {
+        event.preventDefault();
+        sync();
+        const pos = getBlockPosFromSelection(editor);
+        if (pos !== null) selectBlockAt(editor, pos);
+        setIsMenuOpen(open => !open);
+      }
+    };
+    editor.on('selectionUpdate', sync);
+    editor.on('focus', sync);
+    editor.view.dom.addEventListener('keydown', shortcut);
+    editor.view.dom.addEventListener('feedmob:open-block-menu', openMenu);
+    return () => { editor.off('selectionUpdate', sync); editor.off('focus', sync); editor.view.dom.removeEventListener('keydown', shortcut); editor.view.dom.removeEventListener('feedmob:open-block-menu', openMenu); };
+  }, [editor, editorContainerRef, isMenuOpen, isDragging]);
+
+  useLayoutEffect(() => {
+    if (!isMenuOpen) return;
+    const position = () => {
+      const anchor = handleRef.current?.getBoundingClientRect();
+      const menu = menuRef.current?.getBoundingClientRect();
+      if (!anchor || !menu) return;
+      setMenuPosition({ left: Math.max(8, Math.min(anchor.left, window.innerWidth - menu.width - 8)), top: Math.max(8, Math.min(anchor.bottom + 6, window.innerHeight - menu.height - 8)) });
+    };
+    position();
+    menuRef.current?.querySelector<HTMLElement>('select, button')?.focus();
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, true);
+    return () => { window.removeEventListener('resize', position); window.removeEventListener('scroll', position, true); };
+  }, [isMenuOpen, handleTop, handleLeft]);
+
   if (!editor) return null;
 
   const focusBlock = () => {
-    if (!activeDomNode || !editor?.view) return;
-    const pos = resolveDomBlockPos(editor.view, activeDomNode);
-    if (pos === null) return;
-    const node = editor.state.doc.nodeAt(pos);
-    if (!node) return;
-    try {
-      if (node.isAtom || node.isLeaf) {
-        // Atom blocks have no inner text position — keep the current caret
-        // instead of letting it escape into a neighbouring block.
-        editor.chain().focus().setNodeSelection(pos).run();
-      } else {
-        editor.commands.focus(pos + 1);
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    const pos = getActiveBlockPos();
+    if (pos !== null) selectBlockAt(editor, pos);
   };
 
   const handlePlusClick = (e: React.MouseEvent) => {
@@ -327,6 +313,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     const pos = getActiveBlockPos();
     if (pos !== null) duplicateBlockAtPos(editor, pos);
     setIsMenuOpen(false);
+    editor.commands.focus();
   };
 
   const handleDelete = () => {
@@ -335,6 +322,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
     setIsMenuOpen(false);
     setActiveDomNode(null);
     setHandleTop(null);
+    editor.commands.focus();
   };
 
   return (
@@ -344,12 +332,13 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
         <div
           ref={handleRef}
           data-block-handle="true"
+          data-block-pos={getActiveBlockPos() ?? undefined}
           style={{
             top: `${handleTop}px`,
             left: `${handleLeft}px`,
             opacity: isDragging ? 0 : 1,
           }}
-          className="absolute z-20 flex items-center gap-1 select-none transition-opacity duration-150"
+          className="absolute z-20 flex items-center gap-0.5 select-none transition-opacity duration-150"
         >
           {/* 1. Notion Plus Button (+) */}
           <div className="relative">
@@ -358,21 +347,12 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
               onMouseDown={(event) => event.preventDefault()}
               aria-label="添加块"
               onClick={handlePlusClick}
-              onMouseEnter={() => setHoveredButton('plus')}
-              onMouseLeave={() => setHoveredButton(null)}
-              className="w-6 h-6 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 flex items-center justify-center transition border border-transparent hover:border-slate-200/60 dark:hover:border-slate-700 shadow-2xs"
+              className="block-handle-button"
               title=""
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
 
-            {/* Notion-style Dark Tooltip for Plus */}
-            {hoveredButton === 'plus' && (
-              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 z-50 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap shadow-xl pointer-events-none animate-in fade-in zoom-in-95">
-                {isAltPressed ? '在上方添加块 (Alt)' : '点击在下方添加块 (Alt+点击在上方)'}
-                <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-900" />
-              </div>
-            )}
           </div>
 
           {/* 2. Notion 6-Dot Grip Handle (⠿) */}
@@ -391,6 +371,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 const sourceDom = activeDomNode;
                 dragSourceRef.current = { pos: blockPos, dom: sourceDom };
                 startBlockDrag(editor.view, blockPos);
+                setIsMenuOpen(false);
                 setIsDragging(true);
 
                 try {
@@ -440,7 +421,7 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
 
                 // 2. Notion-style dimming and grayscale effect on source block in document
                 requestAnimationFrame(() => {
-                  if (sourceDom) {
+                  if (dragSourceRef.current?.dom === sourceDom && getDraggedBlockPos(editor.view) !== null) {
                     sourceDom.classList.add('feedmob-drag-source-active');
                   }
                 });
@@ -470,146 +451,64 @@ export const BlockDragHandle: React.FC<BlockDragHandleProps> = ({
                 focusBlock();
                 setIsMenuOpen(!isMenuOpen);
               }}
-              onMouseEnter={() => setHoveredButton('grip')}
-              onMouseLeave={() => setHoveredButton(null)}
-              className={`w-6 h-6 rounded-md flex items-center justify-center cursor-grab active:cursor-grabbing transition border shadow-2xs ${
-                isMenuOpen
-                  ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
-                  : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 border-transparent hover:border-slate-200/60 dark:hover:border-slate-700'
-              }`}
+              className="block-handle-button cursor-grab active:cursor-grabbing"
               title=""
             >
               <GripVertical className="w-3.5 h-3.5" />
             </button>
 
-            {/* Notion-style Dark Tooltip for Grip */}
-            {hoveredButton === 'grip' && !isMenuOpen && (
-              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 z-50 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap shadow-xl pointer-events-none animate-in fade-in zoom-in-95">
-                拖到上下方调整顺序 · 拖到左右侧并排分栏 · 单击打开菜单
-                <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-900" />
-              </div>
-            )}
           </div>
 
-          {/* Popover Action Menu */}
-          {isMenuOpen && (
-            <div
-              ref={menuRef}
-              role="menu"
-              aria-label="块操作"
-              onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setIsMenuOpen(false); editor.commands.focus(); } }}
-              className="absolute left-0 sm:left-12 top-8 w-60 max-h-[60vh] overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex flex-col gap-1 z-50 animate-in fade-in zoom-in-95 text-sm text-slate-700 dark:text-slate-300"
-            >
-              <div className="px-3 py-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Block 块操作
-              </div>
-
-              {getActiveBlockPos() !== null && canConvertBlock(editor, getActiveBlockPos()!) && (
-                <label className="px-3 py-2 flex items-center gap-2">
-                  <span className="shrink-0">转换为</span>
-                  <select aria-label="转换块类型" value="" className="w-full bg-transparent border rounded px-2 py-1"
-                    onChange={(event) => {
-                      const pos = getActiveBlockPos();
-                      if (pos !== null) convertBlock(editor, pos, event.target.value as BlockType);
-                      setIsMenuOpen(false);
-                    }}>
-                    <option value="" disabled>选择类型</option>
-                    {BLOCK_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </label>
-              )}
-
-              <button
-                type="button"
-                onClick={handleTurnIntoColumns}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 font-bold transition"
-              >
-                <Columns className="w-4 h-4 text-emerald-600" />
-                <span>转换为双栏同行并排</span>
-              </button>
-
-              {editor && getEnclosingColumnList(editor, getActiveBlockPos() ?? undefined) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const pos = getActiveBlockPos();
-                    if (pos !== null) unwrapColumnList(editor, pos);
-                    setIsMenuOpen(false);
-                  }}
-                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-amber-50 dark:hover:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-bold transition"
-                >
-                  <Rows className="w-4 h-4 text-amber-600" />
-                  <span>解散分栏 / 还原为独立段落</span>
-                </button>
-              )}
-
-              <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-              <button
-                type="button"
-                onClick={handleMoveUp}
-                className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition font-medium"
-              >
-                <div className="flex items-center gap-2.5">
-                  <ArrowUp className="w-4 h-4 text-blue-500" />
-                  <span>上移 Block</span>
-                </div>
-                <span className="text-xs text-slate-400 font-mono">Alt+↑</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleMoveDown}
-                className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition font-medium"
-              >
-                <div className="flex items-center gap-2.5">
-                  <ArrowDown className="w-4 h-4 text-blue-500" />
-                  <span>下移 Block</span>
-                </div>
-                <span className="text-xs text-slate-400 font-mono">Alt+↓</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDuplicate}
-                className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition font-medium"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Copy className="w-4 h-4 text-slate-500" />
-                  <span>复制 Block</span>
-                </div>
-                <span className="text-xs text-slate-400 font-mono">Ctrl+D</span>
-              </button>
-
-              <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
-
-              <button
-                type="button"
-                onClick={handleDelete}
-                className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-red-50 dark:hover:bg-red-950/40 text-red-600 font-semibold transition"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>删除 Block</span>
-              </button>
-            </div>
+          {isMenuOpen && createPortal(
+            <div ref={menuRef} role="group" aria-label="块操作" className="block-action-menu popover-panel fixed z-[60]"
+              style={menuPosition}
+              onKeyDown={event => {
+                if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setIsMenuOpen(false); editor.commands.focus(); }
+                if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !(event.target instanceof HTMLSelectElement)) {
+                  const controls = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('button, select') || []);
+                  const current = controls.indexOf(document.activeElement as HTMLElement);
+                  const next = (current + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) % controls.length;
+                  event.preventDefault(); controls[next]?.focus();
+                }
+              }}>
+              <div className="slash-group">块操作</div>
+              {getActiveBlockPos() !== null && canConvertBlock(editor, getActiveBlockPos()!) && <label className="flex items-center gap-2 px-2 py-2 text-xs">
+                <span className="shrink-0 text-[var(--muted-foreground)]">转换为</span>
+                <select aria-label="转换块类型" value="" className="w-full text-sm" onChange={event => { const pos = getActiveBlockPos(); if (pos !== null) convertBlock(editor, pos, event.target.value as BlockType); setIsMenuOpen(false); }}>
+                  <option value="" disabled>选择类型</option>{BLOCK_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>}
+              <div className="popover-divider" />
+              <button type="button" onClick={handleMoveUp} className="popover-row"><ArrowUp size={15} /><span>上移</span><kbd className="ml-auto">Alt ↑</kbd></button>
+              <button type="button" onClick={handleMoveDown} className="popover-row"><ArrowDown size={15} /><span>下移</span><kbd className="ml-auto">Alt ↓</kbd></button>
+              <button type="button" onClick={handleDuplicate} className="popover-row"><Copy size={15} /><span>复制块</span><kbd className="ml-auto">⌘ / Ctrl D</kbd></button>
+              <div className="popover-divider" />
+              <button type="button" onClick={handleTurnIntoColumns} className="popover-row"><Columns size={15} />转换为双栏</button>
+              {getEnclosingColumnList(editor, getActiveBlockPos() ?? undefined) && <button type="button" className="popover-row" onClick={() => { const pos = getActiveBlockPos(); if (pos !== null) unwrapColumnList(editor, pos); setIsMenuOpen(false); }}><Rows size={15} />解散分栏</button>}
+              <div className="popover-divider" />
+              <button type="button" onClick={handleDelete} className="popover-row text-red-600"><Trash2 size={15} />删除块</button>
+            </div>, document.body
           )}
+
         </div>
       )}
 
-      {/* 2. Notion-style Pure Glowing Blue Drop Indicator Line (OUTSIDE the handle div, positioned relative to containerRef) */}
-      {dropIndicator && (
+      {dropIndicator && <>
+        <div className="block-drop-highlight" style={dropIndicator.highlight} />
         <div
           data-testid="block-drop-indicator"
           data-orientation={dropIndicator.isVertical ? 'vertical' : 'horizontal'}
-          className="absolute z-30 pointer-events-none rounded-full bg-[#2383E2] shadow-[0_0_6px_rgba(35,131,226,0.45)] transition-all duration-75"
-          style={{
-            top: `${dropIndicator.top}px`,
-            left: `${dropIndicator.left}px`,
-            width: `${dropIndicator.width}px`,
-            height: `${dropIndicator.height}px`,
-          }}
+          data-zone={dropIndicator.zone}
+          className="absolute z-30 pointer-events-none rounded-full bg-[var(--accent)]"
+          style={{ top: dropIndicator.top, left: dropIndicator.left, width: dropIndicator.width, height: dropIndicator.height }}
         />
-      )}
+        <div data-testid="block-drop-label" className="block-drop-label"
+          style={{
+            top: dropIndicator.highlight.top - 30,
+            left: Math.max(0, Math.min(dropIndicator.left + 8, (editorContainerRef.current?.clientWidth ?? 500) - 200)),
+          }}>{dropIndicator.label}</div>
+      </>}
+
     </>
   );
 };

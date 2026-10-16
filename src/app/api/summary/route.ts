@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     });
 
     // Generate Markdown Weekly Summary
-    let markdown = `# 📋 Feedmob 团队工作周报汇总 (${startDate || '本周'} ~ ${endDate || '至今'})\n\n`;
+    let markdown = `# 📋 Minework 团队工作周报汇总 (${startDate || '本周'} ~ ${endDate || '至今'})\n\n`;
     
     // Group by User
     const userGroups: Record<string, { user: any; logs: typeof logs }> = {};

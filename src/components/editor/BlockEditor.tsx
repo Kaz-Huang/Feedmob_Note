@@ -1,8 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { SelectionToolbar } from './SelectionToolbar';
+import { ToggleNode } from './extensions/ToggleNode';
+import { BlockSelection, handleBlockSelectionKeyDown } from './extensions/BlockSelection';
+import { EditorLinkPopover } from './EditorLinkPopover';
+import { BlockSelectionToolbar } from './BlockSelectionToolbar';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
@@ -19,10 +23,6 @@ import { ColumnList, Column } from './extensions/ColumnsExtension';
 import { SlashCommandMenu, LOG_TEMPLATE } from './SlashCommandMenu';
 import { BlockDragHandle } from './BlockDragHandle';
 import { moveBlock, duplicateBlock } from './utils/block-movement';
-import {
-  computeBlockDropTarget,
-  moveBlockToDropTarget,
-} from './utils/block-movement';
 import { SlashCommand } from './extensions/SlashCommand';
 import { getDraggedBlockPos } from './utils/block-drag';
 import { useSlashCommand } from './useSlashCommand';
@@ -36,10 +36,14 @@ import {
   Highlighter,
   Check,
   Save,
-  Sparkles,
   Plus,
   X,
-  ArrowUpDown,
+  Keyboard,
+  MoreHorizontal,
+  Link2,
+  Undo2,
+  Redo2,
+  FileText,
   Maximize2,
   Minimize2,
 } from 'lucide-react';
@@ -88,6 +92,12 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
+  const optionsRef = useRef<HTMLDivElement>(null);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [wordCount, setWordCount] = useState(0);
 
   const savingRef = useRef(false);
   const [savePending, setSavePending] = useState(false);
@@ -100,6 +110,8 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
     immediatelyRender: false,
     extensions: [
       StarterKit.configure({
+        // A second native cursor contradicts the column/group drop preview.
+        dropcursor: false,
         heading: {
           levels: [1, 2, 3],
         },
@@ -116,11 +128,15 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
         openOnClick: false,
       }),
       Placeholder.configure({
-        placeholder: ({ node }) => {
+        includeChildren: true,
+        showOnlyCurrent: false,
+        placeholder: ({ node, pos, editor }) => {
+          const $pos = editor.state.doc.resolve(pos);
+          if ($pos.parent.type.name === 'toggle' && $pos.index() === 0) return '折叠标题';
           if (node.type.name === 'heading') {
             return '标题...';
           }
-          return '输入文字，或按 / 选择块类型';
+          return '输入文字，或按 / 插入块';
         },
       }),
       CalloutNode,
@@ -130,9 +146,12 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
       ColumnList,
       Column,
       SlashCommand,
+      ToggleNode,
+      BlockSelection,
     ],
     content: initialSnapshot.contentJson,
     editorProps: {
+      attributes: { role: 'textbox', 'aria-label': '日志正文', 'aria-multiline': 'true' },
       handleDOMEvents: {
         // Let the native IME commit its candidate without passing Enter through
         // ProseMirror keymaps. Returning here does not prevent the DOM default.
@@ -147,24 +166,9 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
           return false;
         },
       },
-      handleDrop: (view, event) => {
-        const sourcePos = getDraggedBlockPos(view);
-        if (sourcePos === null || !editor) return false;
-
-        event.preventDefault();
-        if (typeof document !== 'undefined') {
-          document.querySelectorAll('.feedmob-drag-source-active').forEach((el) => {
-            el.classList.remove('feedmob-drag-source-active');
-          });
-        }
-        const dropTarget = computeBlockDropTarget(view, event.clientX, event.clientY, {
-          sourcePos,
-        });
-        if (dropTarget !== null) {
-          moveBlockToDropTarget(editor, sourcePos, dropTarget);
-        }
-        return true;
-      },
+      // Custom block drops are handled in the container's capture phase so
+      // its gutters and the editable DOM share the same preview/commit path.
+      handleDrop: view => getDraggedBlockPos(view) !== null,
       handleClick: (view, pos, event) => {
         const dom = event.target as HTMLElement;
         if (dom === view.dom && event.clientY >= (view.dom.lastElementChild?.getBoundingClientRect().bottom ?? 0)) {
@@ -189,6 +193,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
       },
       handleKeyDown: (view, event) => {
         if (event.isComposing || view.composing || event.keyCode === 229) return false;
+        if (editor && handleBlockSelectionKeyDown(editor, event)) return true;
         // Handle Alt + ArrowUp to move block up
         if (event.altKey && event.key === 'ArrowUp') {
           event.preventDefault();
@@ -236,6 +241,7 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
       currentSnapshotRef.current = snapshot;
       const dirty = snapshotKey(snapshot) !== savedRef.current;
       setIsDirty(dirty);
+      setWordCount(editor.getText().replace(/\s/g, "").length);
       try {
         if (dirty) localStorage.setItem(draftKey, JSON.stringify(snapshot));
         else localStorage.removeItem(draftKey);
@@ -295,281 +301,134 @@ export const BlockEditor: React.FC<BlockEditorProps> = ({
   };
 
   const { isFullWidth, toggleFullWidth } = useCurrentUser();
-  const containerWidthClass = isFullWidth
-    ? 'w-full px-6 sm:px-12 lg:px-16'
-    : 'max-w-6xl xl:max-w-7xl mx-auto w-full px-6 sm:px-12 lg:px-16';
+
+  useLayoutEffect(() => {
+    const resize = () => {
+      if (!titleRef.current) return;
+      titleRef.current.style.height = '0px';
+      titleRef.current.style.height = Math.max(48, titleRef.current.scrollHeight) + 'px';
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, [title, isFullWidth]);
+
+  useEffect(() => {
+    if (!optionsOpen) return;
+    const dismiss = (event: MouseEvent) => {
+      if (!optionsRef.current?.contains(event.target as Node)) setOptionsOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setOptionsOpen(false); optionsRef.current?.querySelector('button')?.focus(); }
+    };
+    document.addEventListener('mousedown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('mousedown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [optionsOpen]);
+
+  useEffect(() => {
+    if (!isMoodPickerOpen) return;
+    const dismiss = (event: MouseEvent) => {
+      if (!(event.target as Element).closest('[data-mood-picker]')) setIsMoodPickerOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setIsMoodPickerOpen(false); };
+    document.addEventListener('mousedown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('mousedown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [isMoodPickerOpen]);
+
+  const focusEnd = () => {
+    if (!editor) return;
+    const { doc } = editor.state;
+    if (doc.lastChild?.type.name !== 'paragraph' || doc.lastChild.content.size) {
+      editor.chain().focus().insertContentAt(doc.content.size, { type: 'paragraph' }).setTextSelection(doc.content.size + 1).run();
+    } else editor.commands.focus('end');
+  };
 
   return (
-    <div className="flex-1 flex flex-col w-full bg-white dark:bg-slate-950">
-
-      {/* Notion Document Header & Property Bar */}
-      <div className="border-b border-slate-100 dark:border-slate-800/80 bg-white/80 dark:bg-slate-950/80">
-        <div className={`${containerWidthClass} py-3 flex flex-wrap items-center justify-between gap-3 transition-all duration-200`}>
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Mood Icon Picker */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setIsMoodPickerOpen(!isMoodPickerOpen)}
-                className="w-10 h-10 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-2xl transition border border-slate-200/60 dark:border-slate-800 shadow-2xs"
-                title="设置今日状态 / 图标"
-              >
-                <span>{mood}</span>
+    <div className="document-editor flex-1 flex flex-col min-w-0">
+      <div className="document-toolbar">
+        <span role="status" className="document-status">
+          <span className={`status-dot ${isDirty ? 'is-dirty' : ''}`} />
+          {isDirty ? (draftStored ? '本地草稿已保存 · 有未提交修改' : '有未提交修改 · 请及时提交') : (lastSavedTime ? `成功保存于 ${lastSavedTime}` : '准备开始记录')}
+        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button type="button" onClick={insertTemplate} className="quiet-button template-button"><FileText size={15} />日志模板</button>
+          <div ref={optionsRef} className="relative">
+            <button type="button" aria-label="页面选项" aria-expanded={optionsOpen} onClick={() => setOptionsOpen(!optionsOpen)} className="icon-button"><MoreHorizontal size={19} /></button>
+            {optionsOpen && <div className="page-options popover-panel" role="group" aria-label="页面选项">
+              <button type="button" onClick={() => { toggleFullWidth(); setOptionsOpen(false); }} className="popover-row">
+                {isFullWidth ? <Minimize2 size={16} /> : <Maximize2 size={16} />}<span>{isFullWidth ? '恢复标准宽度' : '展开为全宽'}</span>
               </button>
-              {isMoodPickerOpen && (
-                <div className="absolute left-0 top-full mt-2 z-40 p-2.5 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 flex gap-1.5 animate-in fade-in">
-                  {MOODS.map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => {
-                        setMood(m);
-                        setIsMoodPickerOpen(false);
-                      }}
-                      className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-2xl transition"
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Tag List Property */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800"
-                >
-                  #{tag}
-                  <button
-                    type="button"
-                    onClick={() => removeTag(tag)}
-                    className="hover:text-red-500 transition ml-0.5"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </span>
-              ))}
-
-              {isAddingTag ? (
-                <div className="inline-flex items-center gap-1">
-                  <input
-                    type="text"
-                    value={newTagInput}
-                    onChange={(e) => setNewTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleAddTag();
-                      if (e.key === 'Escape') setIsAddingTag(false);
-                    }}
-                    autoFocus
-                    placeholder="输入标签名..."
-                    className="text-sm px-3 py-1 rounded-xl border border-emerald-500 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 outline-none w-32"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddTag}
-                    className="p-1 text-emerald-600 hover:text-emerald-700"
-                  >
-                    <Check className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsAddingTag(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-sm text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition border border-dashed border-slate-200 dark:border-slate-800"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>添加标签</span>
-                </button>
-              )}
-            </div>
+              <button type="button" onClick={() => { insertTemplate(); setOptionsOpen(false); }} className="popover-row"><FileText size={16} />插入日志模板</button>
+              <button type="button" onClick={() => { setHelpOpen(!helpOpen); setOptionsOpen(false); }} className="popover-row"><Keyboard size={16} />键盘快捷键</button>
+              <div className="popover-divider" />
+              <button type="button" disabled={!editor?.can().undo()} onClick={() => { editor?.chain().focus().undo().run(); setOptionsOpen(false); }} className="popover-row"><Undo2 size={16} />撤销<span className="ml-auto text-xs">⌘ / Ctrl Z</span></button>
+              <button type="button" disabled={!editor?.can().redo()} onClick={() => { editor?.chain().focus().redo().run(); setOptionsOpen(false); }} className="popover-row"><Redo2 size={16} />重做</button>
+            </div>}
           </div>
-
-          {/* Action buttons & Notion Full-Width Switch */}
-          <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap">
-            {/* Notion Full Width Toggle */}
-            <button
-              type="button"
-              onClick={toggleFullWidth}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition ${
-                isFullWidth
-                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shadow-2xs'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent'
-              }`}
-              title={isFullWidth ? '切换为居中标准宽度' : '切换为通栏全宽模式 (Full Width)'}
-            >
-              {isFullWidth ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-              <span>{isFullWidth ? '通栏宽屏 (已开启)' : '通栏宽屏'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={insertTemplate}
-              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-sm font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 transition"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>插入日志模版</span>
-            </button>
-
-            <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-xl">
-              <ArrowUpDown className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Alt+↑/↓ 移动 Block</span>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleManualSave}
-              disabled={isSaving || savePending}
-              className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition disabled:opacity-50 shadow-xs"
-            >
-              <Save className="w-4 h-4" />
-              <span>{isSaving || savePending ? '正在保存...' : '提交工作日志'}</span>
-            </button>
-          </div>
+          <button type="button" onClick={handleManualSave} disabled={isSaving || savePending} className="primary-button">
+            <Save size={14} /><span>{isSaving || savePending ? '正在保存...' : '提交工作日志'}</span>
+          </button>
         </div>
       </div>
+      {saveError && <div role="alert" className="save-error">{saveError}<button type="button" disabled={savePending} onClick={handleManualSave}>重试</button></div>}
 
-      {/* Notion Full Canvas Area */}
-      <div
-        className={`flex-1 w-full ${containerWidthClass} py-8 pb-72 flex flex-col cursor-text transition-all duration-200`}
-        onClick={(e) => {
-          if (!editor) return;
-          const target = e.target as HTMLElement;
-          if (target.closest('input, button, select, textarea, [data-bubble-menu="true"]')) {
-            return;
-          }
-          // Clicks inside the editor itself (or on the floating block handle)
-          // are ProseMirror's business — intercepting them here used to force
-          // the caret to the document end on every click.
-          if (target.closest('.tiptap') || target.closest('[data-block-handle]')) {
-            return;
-          }
-
-          // If clicking anywhere in the spacious canvas or bottom buffer:
-          const { doc } = editor.state;
-          const lastChild = doc.lastChild;
-
-          const isLastChildEmptyParagraph =
-            lastChild &&
-            lastChild.type.name === 'paragraph' &&
-            lastChild.content.size === 0;
-
-          if (!isLastChildEmptyParagraph) {
-            // Last block has text/content: insert a fresh block below and focus it
-            editor
-              .chain()
-              .focus()
-              .insertContentAt(doc.content.size, { type: 'paragraph' })
-              .setTextSelection(doc.content.size + 1)
-              .run();
-          } else {
-            // Already an empty block at the end: focus it directly
-            editor.commands.focus('end');
-          }
-        }}
-      >
-        <div ref={containerRef} className="relative pl-14 sm:pl-16 flex-1 flex flex-col">
-          {/* Notion-style Floating Block Drag & Action Handle */}
-          <BlockDragHandle editor={editor} editorContainerRef={containerRef} />
-
-          {/* Document Title Input */}
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(event) => {
+      <div className={`document-canvas ${isFullWidth ? 'is-full-width' : ''}`}>
+        <div className="document-heading">
+          <div className="relative inline-block" data-mood-picker>
+            <button type="button" aria-label="设置日志图标" aria-expanded={isMoodPickerOpen} onClick={() => setIsMoodPickerOpen(!isMoodPickerOpen)} className="document-icon">{mood}</button>
+            {isMoodPickerOpen && <div className="mood-picker popover-panel" role="group" aria-label="选择日志图标">{MOODS.map(m => <button key={m} type="button" aria-label={`选择 ${m}`} className="mood-option" onClick={() => { setMood(m); setIsMoodPickerOpen(false); }}>{m}</button>)}</div>}
+          </div>
+          <textarea ref={titleRef} rows={1} value={title} onChange={event => setTitle(event.target.value.replace(/\r?\n/g, ' '))}
+            onKeyDown={event => {
               if (event.nativeEvent.isComposing) return;
               if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); void handleManualSave(); }
               else if (event.key === 'Enter' || event.key === 'ArrowDown') { event.preventDefault(); editor?.commands.focus('start'); }
-            }}
-            aria-label="日志标题"
-            placeholder="输入今日日志重点概括..."
-            className="w-full text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-slate-100 placeholder:text-slate-300 dark:placeholder:text-slate-700 bg-transparent border-none outline-none mb-8 tracking-tight"
-          />
-
-          {/* Floating Bubble Menu for Selected Text */}
-          {editor && (
-            <SelectionToolbar
-              editor={editor}
-              className="flex items-center gap-1 bg-slate-900 text-white rounded-xl px-2 py-1.5 shadow-2xl border border-slate-700 text-sm"
-            >
-              <button
-                aria-label="加粗"
-                onClick={() => editor.chain().focus().toggleBold().run()}
-                className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('bold') ? 'bg-slate-800 text-emerald-400 font-bold' : ''}`}
-              >
-                <Bold className="w-4 h-4" />
-              </button>
-              <button
-                aria-label="斜体"
-                onClick={() => editor.chain().focus().toggleItalic().run()}
-                className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('italic') ? 'bg-slate-800 text-emerald-400' : ''}`}
-              >
-                <Italic className="w-4 h-4" />
-              </button>
-              <button
-                aria-label="下划线"
-                onClick={() => editor.chain().focus().toggleUnderline().run()}
-                className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('underline') ? 'bg-slate-800 text-emerald-400' : ''}`}
-              >
-                <UnderlineIcon className="w-4 h-4" />
-              </button>
-              <button
-                aria-label="删除线"
-                onClick={() => editor.chain().focus().toggleStrike().run()}
-                className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('strike') ? 'bg-slate-800 text-emerald-400' : ''}`}
-              >
-                <Strikethrough className="w-4 h-4" />
-              </button>
-              <button
-                aria-label="高亮"
-                onClick={() => editor.chain().focus().toggleHighlight().run()}
-                className={`p-1.5 rounded hover:bg-slate-800 ${editor.isActive('highlight') ? 'bg-slate-800 text-yellow-400' : ''}`}
-              >
-                <Highlighter className="w-4 h-4" />
-              </button>
-            </SelectionToolbar>
-          )}
-
-          {/* Tiptap Editor Content */}
-          <EditorContent
-            editor={editor}
-            className="prose dark:prose-invert max-w-none text-slate-800 dark:text-slate-200 flex-1 min-h-[500px]"
-          />
-
-          {/* Slash Command Overlay */}
-          <SlashCommandMenu
-            editor={editor}
-            isOpen={!!slash.match}
-            onClose={slash.close}
-            position={slash.position}
-            query={slash.match?.query}
-            range={slash.match ? { from: slash.match.from, to: slash.match.to } : undefined}
-          />
-        </div>
-      </div>
-
-      {/* Footer Info */}
-      <div className="border-t border-slate-100 dark:border-slate-850 bg-slate-50/50 dark:bg-slate-900/30">
-        <div className={`${containerWidthClass} py-3 flex items-center justify-between text-xs sm:text-sm text-slate-400 transition-all duration-200`}>
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-slate-600 dark:text-slate-300">📅 日期：{date}</span>
-            <span>•</span>
-            <span>💡 提示：输入 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">/</code> 唤起组件；拖到块的上下方调整顺序，拖到左右边缘并排分栏；也可按 <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300 font-mono text-xs">Alt + ↑/↓</code> 移动 Block</span>
-          </div>
-          {saveError && <span role="alert" className="text-red-600">{saveError}</span>}
-          {isDirty && <span role="status" className="text-amber-600">有未提交修改{draftStored ? ' · 已保留本地草稿' : ' · 请及时提交'}</span>}
-          {lastSavedTime && !isDirty && !saveError && (
-            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold shrink-0">
-              <Check className="w-4 h-4" />
-              <span>已于 {lastSavedTime} 成功保存</span>
+            }} aria-label="日志标题" placeholder="未命名日志" className="document-title" />
+          <div className="document-properties">
+            <span className="property-label">标签</span>
+            <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+              {tags.map(tag => <span key={tag} className="document-tag">{tag}<button type="button" aria-label={`删除标签 ${tag}`} onClick={() => removeTag(tag)}><X size={12} /></button></span>)}
+              {isAddingTag ? <div className="flex items-center gap-1">
+                <input aria-label="标签名称" value={newTagInput} onChange={event => setNewTagInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) handleAddTag(); if (event.key === 'Escape') { setIsAddingTag(false); setNewTagInput(''); } }} autoFocus placeholder="标签名称" className="tag-input" />
+                <button type="button" aria-label="确认添加标签" onClick={handleAddTag} className="icon-button"><Check size={15} /></button>
+              </div> : <button type="button" onClick={() => setIsAddingTag(true)} className="property-add"><Plus size={13} />添加标签</button>}
             </div>
-          )}
+          </div>
+        </div>
+
+        <div ref={containerRef} className="document-body relative">
+          <BlockDragHandle editor={editor} editorContainerRef={containerRef} />
+          {editor && <BlockSelectionToolbar editor={editor} />}
+          {editor && <SelectionToolbar editor={editor} className="selection-toolbar">
+            {[
+              { label: '加粗', icon: Bold, mark: 'bold', action: () => editor.chain().focus().toggleBold().run() },
+              { label: '斜体', icon: Italic, mark: 'italic', action: () => editor.chain().focus().toggleItalic().run() },
+              { label: '下划线', icon: UnderlineIcon, mark: 'underline', action: () => editor.chain().focus().toggleUnderline().run() },
+              { label: '删除线', icon: Strikethrough, mark: 'strike', action: () => editor.chain().focus().toggleStrike().run() },
+              { label: '高亮', icon: Highlighter, mark: 'highlight', action: () => editor.chain().focus().toggleHighlight().run() },
+            ].map(({ label, icon: Icon, mark, action }) => <button type="button" key={mark} aria-label={label} aria-pressed={editor.isActive(mark)} onClick={action} className={editor.isActive(mark) ? 'is-active' : ''}><Icon size={16} /></button>)}
+            <span className="toolbar-separator" />
+            <button type="button" aria-label="编辑链接" aria-pressed={editor.isActive('link')} onClick={() => setLinkOpen(true)}><Link2 size={16} /></button>
+          </SelectionToolbar>}
+          {editor && <EditorLinkPopover editor={editor} isOpen={linkOpen} onClose={() => setLinkOpen(false)} />}
+          <EditorContent editor={editor} className="editor-content" />
+          <SlashCommandMenu editor={editor} isOpen={!!slash.match} onClose={slash.close} position={slash.position} query={slash.match?.query} range={slash.match ? { from: slash.match.from, to: slash.match.to } : undefined} />
+          <button type="button" aria-label="在文档末尾添加块" className="document-end" onClick={focusEnd}><Plus size={14} /><span>继续记录，或输入 / 插入块</span></button>
         </div>
       </div>
+      <div className="editor-footer">
+        <span>{date}<span className="mx-2">·</span>{wordCount} 字</span>
+        <div className="flex items-center gap-2"><button type="button" className="quiet-button mobile-block-button" onMouseDown={event => event.preventDefault()} onClick={() => editor?.view.dom.dispatchEvent(new Event('feedmob:open-block-menu'))}>块操作</button><button type="button" className="quiet-button" aria-expanded={helpOpen} onClick={() => setHelpOpen(!helpOpen)}><Keyboard size={15} />快捷键</button></div>
+      </div>
+      {helpOpen && <div className="keyboard-help" role="region" aria-label="编辑器快捷键">
+        <div className="flex items-center justify-between mb-3"><span className="font-medium">让记录跟上思路</span><button type="button" aria-label="关闭快捷键" className="icon-button" onClick={() => setHelpOpen(false)}><X size={16} /></button></div>
+        {[
+          ['/', '搜索并插入块'], ['Enter / Shift Enter', '新建块 / 块内换行'], ['Esc → Shift ↑/↓', '选择块 / 扩展块选区'], ['⌘ / Ctrl D', '复制所选块'], ['Alt ↑/↓', '上下移动块'], ['⌘ / Ctrl /', '打开块操作菜单'], ['⌘ / Ctrl Enter', '提交工作日志'],
+        ].map(([key, text]) => <div key={key} className="flex justify-between gap-4 py-1.5"><span className="text-[var(--muted-foreground)]">{text}</span><kbd>{key}</kbd></div>)}
+        <p className="mt-3 text-xs text-[var(--muted-foreground)]">草稿自动保存在此浏览器；提交后写入工作区。拖到块的左右边缘可以分栏。</p>
+      </div>}
     </div>
   );
 };

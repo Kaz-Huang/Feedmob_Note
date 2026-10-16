@@ -1,174 +1,46 @@
 'use client';
 
 import React, { useState } from 'react';
+import { format } from 'date-fns';
 import { WorkLog } from '@/types';
-import {
-  ChevronLeft,
-  ChevronRight,
-  Calendar as CalendarIcon,
-  AlertTriangle,
-  CheckCircle2,
-  Sparkles,
-} from 'lucide-react';
-import { useCurrentUser } from '@/lib/user-context';
+import { ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
 
-interface CalendarViewProps {
-  logs: WorkLog[];
-  onSelectDate: (dateStr: string) => void;
-}
+interface CalendarViewProps { logs: WorkLog[]; onSelectDate: (dateStr: string) => void; }
 
 export const CalendarView: React.FC<CalendarViewProps> = ({ logs, onSelectDate }) => {
-  const { currentUser } = useCurrentUser();
   const [currentDate, setCurrentDate] = useState(new Date());
-
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
-
-  // First day of month & days in month
-  const firstDay = new Date(year, month, 1).getDay(); // 0 = Sunday
+  const firstDay = new Date(year, month, 1).getDay();
   const totalDays = new Date(year, month + 1, 0).getDate();
-
-  const prevMonth = () => {
-    setCurrentDate(new Date(year, month - 1, 1));
-  };
-
-  const nextMonth = () => {
-    setCurrentDate(new Date(year, month + 1, 1));
-  };
-
-  // Map logs by date string
   const logsByDate: Record<string, WorkLog[]> = {};
   for (const log of logs) {
-    if (!logsByDate[log.date]) {
-      logsByDate[log.date] = [];
-    }
+    if (!logsByDate[log.date]) logsByDate[log.date] = [];
     logsByDate[log.date].push(log);
   }
+  const daysArray = Array.from({ length: totalDays }, (_, index) => index + 1);
+  const paddingArray = Array.from({ length: (firstDay + 6) % 7 }, (_, index) => index);
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-  const daysArray = Array.from({ length: totalDays }, (_, i) => i + 1);
-  const paddingArray = Array.from({ length: (firstDay + 6) % 7 }, (_, i) => i); // Monday first
-
-  const todayStr = new Date().toISOString().split('T')[0];
-
-  return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-7 shadow-xs">
-      {/* Month Header */}
-      <div className="flex items-center justify-between mb-7">
-        <div className="flex items-center gap-3.5">
-          <div className="p-2.5 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
-            <CalendarIcon className="w-6 h-6" />
-          </div>
-          <div>
-            <h2 className="text-lg font-extrabold text-slate-900 dark:text-slate-100">
-              {year} 年 {month + 1} 月 工作日志时间线
-            </h2>
-            <p className="text-sm text-slate-400 mt-0.5">
-              点击任意日期可快速定位、补填或查阅当天的日志详情
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl">
-          <button
-            type="button"
-            onClick={prevMonth}
-            className="p-2 rounded-xl hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setCurrentDate(new Date())}
-            className="px-4 py-1.5 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-700 rounded-xl transition"
-          >
-            今天
-          </button>
-          <button
-            type="button"
-            onClick={nextMonth}
-            className="p-2 rounded-xl hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Weekday Labels */}
-      <div className="grid grid-cols-7 gap-2.5 text-center text-sm font-bold text-slate-400 mb-3">
-        <span>周一</span>
-        <span>周二</span>
-        <span>周三</span>
-        <span>周四</span>
-        <span>周五</span>
-        <span className="text-emerald-600 dark:text-emerald-400">周六</span>
-        <span className="text-emerald-600 dark:text-emerald-400">周日</span>
-      </div>
-
-      {/* Calendar Days Grid */}
-      <div className="grid grid-cols-7 gap-2.5">
-        {paddingArray.map((p) => (
-          <div
-            key={`pad-${p}`}
-            className="min-h-[110px] p-2.5 bg-slate-50/40 dark:bg-slate-800/20 rounded-2xl border border-dashed border-slate-200/50 dark:border-slate-800"
-          />
-        ))}
-
-        {daysArray.map((day) => {
-          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const isToday = dateStr === todayStr;
-          const dayLogs = logsByDate[dateStr] || [];
-          const hasBlocker = dayLogs.some((l) => l.hasBlocker);
-
-          return (
-            <div
-              key={dateStr}
-              onClick={() => onSelectDate(dateStr)}
-              className={`min-h-[110px] p-3 rounded-2xl border transition cursor-pointer flex flex-col justify-between ${
-                isToday
-                  ? 'border-emerald-500 bg-emerald-50/30 dark:bg-emerald-950/20 shadow-xs'
-                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-300 dark:hover:border-emerald-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span
-                  className={`text-sm font-bold ${
-                    isToday
-                      ? 'w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold'
-                      : 'text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  {day}
-                </span>
-
-                {hasBlocker && (
-                  <span title="包含阻塞卡点">
-                    <AlertTriangle className="w-4 h-4 text-red-500" />
-                  </span>
-                )}
-              </div>
-
-              {/* Badges / Avatars of submitted members */}
-              <div className="flex flex-col gap-1.5 mt-1.5">
-                {dayLogs.slice(0, 2).map((l) => (
-                  <div
-                    key={l.id}
-                    className="text-xs font-medium truncate px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1.5"
-                  >
-                    <span>{l.mood || '📝'}</span>
-                    <span className="truncate">{l.user?.name || l.title || '已写日志'}</span>
-                  </div>
-                ))}
-                {dayLogs.length > 2 && (
-                  <span className="text-xs text-slate-400 pl-1 font-medium">
-                    +{dayLogs.length - 2} 位成员
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+  return <section aria-label="工作日志日历">
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+      <div><h1 className="text-xl font-semibold">日志日历</h1><p className="mt-1.5 text-sm text-[var(--muted-foreground)]">按日期回顾团队进展，选择一天查看或补写日志。</p></div>
+      <div className="flex items-center gap-1"><button type="button" aria-label="上个月" onClick={() => setCurrentDate(new Date(year, month - 1, 1))} className="icon-button"><ChevronLeft size={16} /></button><span aria-live="polite" className="min-w-24 text-center text-sm">{year} 年 {month + 1} 月</span><button type="button" aria-label="下个月" onClick={() => setCurrentDate(new Date(year, month + 1, 1))} className="icon-button"><ChevronRight size={16} /></button><button type="button" onClick={() => setCurrentDate(new Date())} className="quiet-button ml-1 px-2 py-2 text-xs">本月</button></div>
     </div>
-  );
+    <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs text-[var(--muted-foreground)] sm:gap-2">{['周一', '周二', '周三', '周四', '周五', '周六', '周日'].map(day => <span key={day} className="py-2">{day}</span>)}</div>
+    <div className="grid grid-cols-7 gap-1 sm:gap-2">
+      {paddingArray.map(index => <div key={`pad-${index}`} aria-hidden="true" className="min-h-20 rounded bg-[var(--muted)] sm:min-h-[110px]" />)}
+      {daysArray.map(day => {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const isToday = dateStr === todayStr;
+        const dayLogs = logsByDate[dateStr] || [];
+        const hasBlocker = dayLogs.some(log => log.hasBlocker);
+        return <button key={dateStr} type="button" onClick={() => onSelectDate(dateStr)} aria-label={`${dateStr}${isToday ? '，今天' : ''}，${dayLogs.length} 条日志${hasBlocker ? '，包含阻塞点' : ''}`} aria-current={isToday ? 'date' : undefined} className={`flex min-h-20 min-w-0 flex-col rounded border p-1.5 text-left transition-colors hover:bg-[var(--muted)] sm:min-h-[110px] sm:p-2.5 ${isToday ? 'border-[var(--accent)] bg-[var(--muted)]' : 'border-[var(--border)] bg-[var(--background)]'}`}>
+          <span className="flex items-center justify-between gap-1"><span className={`flex h-6 w-6 items-center justify-center rounded text-xs ${isToday ? 'bg-[var(--accent)] text-[var(--accent-foreground)]' : ''}`}>{day}</span>{hasBlocker && <AlertTriangle size={12} aria-hidden="true" className="shrink-0 text-red-500" />}</span>
+          {dayLogs.length > 0 && <span className="mt-auto pt-2 text-[10px] text-[var(--muted-foreground)] sm:hidden">{dayLogs.length} 条</span>}
+          <span className="mt-2 hidden flex-col gap-1 sm:flex">{dayLogs.slice(0, 2).map(log => <span key={log.id} className="block truncate rounded bg-[var(--muted)] px-1.5 py-0.5 text-[11px]">{log.user?.name || log.title || '已写日志'}</span>)}{dayLogs.length > 2 && <span className="px-1 text-[11px] text-[var(--muted-foreground)]">+{dayLogs.length - 2} 条</span>}</span>
+        </button>;
+      })}
+    </div>
+  </section>;
 };
-

@@ -8,10 +8,19 @@ export function parseDocument(value: unknown): JSONContent {
   if (!parsed || typeof parsed !== 'object' || (parsed as JSONContent).type !== 'doc') {
     throw new Error('日志内容格式无效，未打开编辑器以避免覆盖原文。');
   }
-  const clean = (node: JSONContent): JSONContent => ({
-    ...node,
-    ...(node.content ? { content: node.content.filter(child => child.type !== 'text' || !!child.text).map(clean) } : {}),
-  });
+  const clean = (node: JSONContent): JSONContent => {
+    if (!node || typeof node !== 'object' || Array.isArray(node) || typeof node.type !== 'string'
+      || (node.content !== undefined && !Array.isArray(node.content))
+      || (node.type === 'text' && typeof node.text !== 'string')) {
+      throw new Error('日志内容块格式无效，未打开编辑器以避免覆盖原文。');
+    }
+    let content = node.content?.map(clean).filter(child => child.type !== 'text' || !!child.text);
+    // Older divider commands could persist an invalid empty toggle. Restore
+    // its required title without discarding any existing body or attributes.
+    if (node.type === 'toggle' && content?.[0]?.type !== 'paragraph') content = [{ type: 'paragraph' }, ...(content ?? [])];
+    if (node.type === 'doc' && !content?.length) content = [{ type: 'paragraph' }];
+    return { ...node, ...(content ? { content } : {}) };
+  };
   return clean(parsed as JSONContent);
 }
 

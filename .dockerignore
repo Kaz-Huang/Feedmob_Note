@@ -1,0 +1,11 @@
+node_modules
+.next
+.runtime
+.git
+.env*
+!.env.example
+prisma/dev.db
+prisma/dev.db-journal
+tests
+docs
+*.log

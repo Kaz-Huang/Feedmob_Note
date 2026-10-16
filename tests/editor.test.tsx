@@ -10,26 +10,67 @@ import { CalloutNode } from '../src/components/editor/extensions/CalloutNode';
 import { MermaidNode } from '../src/components/editor/extensions/MermaidNode';
 import { EmbedNode } from '../src/components/editor/extensions/EmbedNode';
 import { WhiteboardNode } from '../src/components/editor/extensions/WhiteboardNode';
+import { ToggleNode } from '../src/components/editor/extensions/ToggleNode';
 import { SlashCommand, slashCommandKey } from '../src/components/editor/extensions/SlashCommand';
 import { SLASH_ITEMS } from '../src/components/editor/SlashCommandMenu';
-import { computeBlockDropTarget, duplicateBlock, moveBlock, moveBlockToDropTarget, resolveDomBlockPos, turnBlockIntoColumns, type BlockDropTarget } from '../src/components/editor/utils/block-movement';
+import { computeBlockDropTarget, deleteBlockAtPos, duplicateBlock, moveBlock, moveBlockToDropTarget, resolveDomBlockPos, turnBlockIntoColumns, type BlockDropTarget } from '../src/components/editor/utils/block-movement';
 import { startBlockDrag, getDraggedBlockPos } from '../src/components/editor/utils/block-drag';
 import { parseDocument } from '../src/components/editor/utils/document';
 import { BLOCK_TYPES, convertBlock } from '../src/components/editor/utils/block-conversion';
 import { parseEmbedUrl } from '../src/components/editor/utils/embed-url';
+import { findBlockAtPoint } from '../src/components/editor/utils/block-dom';
 
 
 const editors: Editor[] = [];
 const p = (text = '') => ({ type: 'paragraph', ...(text ? { content: [{ type: 'text', text }] } : {}) });
 function make(content: any[] = [p()]) {
   const editor = new Editor({
-    extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), ColumnList, Column, CalloutNode, MermaidNode, WhiteboardNode, EmbedNode, SlashCommand],
+    extensions: [StarterKit, TaskList, TaskItem.configure({ nested: true }), ColumnList, Column, CalloutNode, MermaidNode, WhiteboardNode, EmbedNode, SlashCommand, ToggleNode],
     content: { type: 'doc', content },
   });
   editors.push(editor);
   return editor;
 }
 afterEach(() => { for (const editor of editors.splice(0)) editor.destroy(); });
+
+test('deleting the empty final block in a column removes that column and unwraps the surviving content', () => {
+  const richLeft = { type: 'paragraph', content: [{ type: 'text', text: 'keep left', marks: [{ type: 'bold' }] }] };
+  const editor = make([{ type: 'columnList', content: [
+    { type: 'column', content: [richLeft] }, { type: 'column', content: [p()] },
+  ] }, p('after')]);
+  const before = editor.getJSON();
+  assert.equal(deleteBlockAtPos(editor, posOf(editor, '')), true);
+  assert.deepEqual(editor.getJSON().content, [richLeft, p('after')]);
+  editor.state.doc.check();
+  assert.equal(editor.commands.undo(), true);
+  assert.deepEqual(editor.getJSON(), before);
+});
+
+test('deleting an empty middle column preserves the other columns and their order', () => {
+  const editor = make([{ type: 'columnList', attrs: { columns: 3 }, content: [
+    { type: 'column', content: [p('left')] }, { type: 'column', content: [p()] },
+    { type: 'column', content: [p('right')] },
+  ] }]);
+  const before = editor.getJSON();
+  assert.equal(deleteBlockAtPos(editor, posOf(editor, '')), true);
+  const row = editor.state.doc.firstChild!;
+  assert.equal(row.attrs.columns, 2);
+  assert.deepEqual([row.child(0).textContent, row.child(1).textContent], ['left', 'right']);
+  editor.state.doc.check();
+  editor.commands.undo();
+  assert.deepEqual(editor.getJSON(), before);
+});
+
+test('deleting one empty block keeps other blocks in the same column', () => {
+  const editor = make([{ type: 'columnList', content: [
+    { type: 'column', content: [p('left')] }, { type: 'column', content: [p(), p('keep right')] },
+  ] }]);
+  assert.equal(deleteBlockAtPos(editor, posOf(editor, '')), true);
+  assert.equal(editor.state.doc.firstChild!.childCount, 2);
+  assert.equal(editor.state.doc.firstChild!.child(1).childCount, 1);
+  assert.equal(editor.state.doc.firstChild!.child(1).textContent, 'keep right');
+  editor.state.doc.check();
+});
 function posOf(editor: Editor, text: string) {
   let result = -1;
   editor.state.doc.descendants((node, pos) => { if (node.isTextblock && node.textContent === text) result = pos; });
@@ -39,6 +80,104 @@ function posOf(editor: Editor, text: string) {
 function drop(editor: Editor, source: number, target: number, zone: BlockDropTarget['zone']) {
   return moveBlockToDropTarget(editor, source, { zone, targetPos: target, targetNode: editor.state.doc.nodeAt(target)! } as BlockDropTarget);
 }
+
+function rect(el: HTMLElement, left: number, top: number, width: number, height: number) {
+  el.getBoundingClientRect = () => ({ top, bottom: top + height, left, right: left + width, width, height, x: left, y: top, toJSON: () => ({}) });
+}
+function atPoint(element: HTMLElement, run: () => void) {
+  const previous = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+  Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => element });
+  try { run(); } finally {
+    if (previous) Object.defineProperty(document, 'elementFromPoint', previous);
+    else delete (document as any).elementFromPoint;
+  }
+}
+
+test('the middle of a wide block merges right and corners keep vertical ordering', () => {
+  const editor = make([p('source'), p('between'), p('wide target')]);
+  const target = editor.view.dom.querySelectorAll('p')[2] as HTMLElement;
+  rect(target, 100, 200, 1000, 40);
+  atPoint(target, () => {
+    const sourcePos = posOf(editor, 'source');
+    assert.equal(computeBlockDropTarget(editor.view, 250, 225, { sourcePos })?.zone, 'right');
+    assert.equal(computeBlockDropTarget(editor.view, 110, 202, { sourcePos })?.zone, 'above');
+    assert.equal(computeBlockDropTarget(editor.view, 110, 220, { sourcePos })?.zone, 'left');
+  });
+});
+
+test('hovering padding in the right column addresses its block rather than the row', () => {
+  const editor = make([{ type: 'columnList', content: [
+    { type: 'column', content: [p('A')] }, { type: 'column', content: [p('B')] },
+  ] }]);
+  const columns = editor.view.dom.querySelectorAll<HTMLElement>('[data-type="column"]');
+  const right = columns[1], block = right.querySelector('p')!;
+  rect(editor.view.dom, 100, 100, 1000, 300);
+  rect(right, 656, 100, 444, 80);
+  rect(block, 656, 100, 444, 30);
+  atPoint(right, () => {
+    const hit = findBlockAtPoint(editor.view, 900, 145);
+    assert.equal(hit?.pos, posOf(editor, 'B'));
+    assert.equal(hit?.dom, block);
+  });
+});
+
+test('toggle title hover selects the whole toggle and its body remains independent', () => {
+  const editor = make([{ type: 'toggle', content: [p('title'), p('body')] }]);
+  const paragraphs = editor.view.dom.querySelectorAll<HTMLElement>('p');
+  atPoint(paragraphs[0], () => assert.equal(findBlockAtPoint(editor.view, 0, 0)?.pos, 0));
+  atPoint(paragraphs[1], () => assert.equal(findBlockAtPoint(editor.view, 0, 0)?.pos, posOf(editor, 'body')));
+});
+
+test('row-wide bottom guide extracts a column block with complete single-step undo', () => {
+  const editor = make([{ type: 'columnList', content: [
+    { type: 'column', content: [p('A')] }, { type: 'column', content: [p('B')] },
+  ] }, p('C')]);
+  const before = editor.getJSON();
+  const row = editor.view.dom.querySelector<HTMLElement>('[data-type="column-list"]')!;
+  const block = row.querySelectorAll<HTMLElement>('p')[1];
+  rect(row, 100, 100, 1000, 80); rect(block, 656, 100, 444, 30);
+  atPoint(block, () => {
+    const target = computeBlockDropTarget(editor.view, 900, 177, { sourcePos: posOf(editor, 'B') });
+    assert.equal(target?.scope, 'row');
+    assert.equal(target?.zone, 'below');
+    assert.equal(target?.indicator.width, 1000);
+    assert.equal(moveBlockToDropTarget(editor, posOf(editor, 'B'), target!), true);
+  });
+  assert.deepEqual(editor.getJSON().content?.map(n => n.type), ['paragraph', 'paragraph', 'paragraph']);
+  assert.equal(editor.getText(), 'A\n\nB\n\nC');
+  editor.state.doc.check();
+  assert.equal(editor.commands.undo(), true);
+  assert.deepEqual(editor.getJSON(), before);
+});
+
+test('vertical drop within a column preserves the other column and surrounding rows', () => {
+  const editor = make([{ type: 'columnList', content: [
+    { type: 'column', content: [p('A')] }, { type: 'column', content: [p('B')] },
+  ] }, p('C'), p('D')]);
+  assert.equal(drop(editor, posOf(editor, 'C'), posOf(editor, 'A'), 'below'), true);
+  const row = editor.state.doc.firstChild!;
+  assert.equal(row.type.name, 'columnList');
+  assert.equal(row.childCount, 2);
+  assert.deepEqual(Array.from({length:row.child(0).childCount},(_,i)=>row.child(0).child(i).textContent), ['A','C']);
+  assert.equal(row.child(1).textContent, 'B');
+  assert.equal(editor.state.doc.lastChild!.textContent, 'D');
+});
+
+test('side drop onto existing columns extends the same group and undoes atomically', () => {
+  const editor = make([{ type: 'columnList', content: [
+    { type: 'column', content: [p('A')] }, { type: 'column', content: [p('B')] },
+  ] }, p('C'), p('D')]);
+  const before = editor.getJSON();
+  assert.equal(drop(editor, posOf(editor, 'C'), posOf(editor, 'B'), 'right'), true);
+  const row = editor.state.doc.firstChild!;
+  assert.equal(row.childCount, 3);
+  assert.equal(row.attrs.columns, 3);
+  assert.deepEqual(Array.from({length:3},(_,i)=>row.child(i).textContent), ['A','B','C']);
+  assert.equal(editor.state.doc.lastChild!.textContent, 'D');
+  editor.state.doc.check();
+  assert.equal(editor.commands.undo(), true);
+  assert.deepEqual(editor.getJSON(), before);
+});
 
 test('all slash commands produce valid nodes and remove only the query', () => {
   for (const item of SLASH_ITEMS) {
@@ -96,9 +235,9 @@ test('DOM and keyboard agree on task item positions', () => {
 });
 
 test('drop zones create columns without a modifier and draw the guide at the real edge', () => {
-  const editor = make([p('source'), p('target')]);
+  const editor = make([p('source'), p('between'), p('target')]);
   const blocks = editor.view.dom.querySelectorAll('p');
-  const targetBlock = blocks[1] as HTMLElement;
+  const targetBlock = blocks[2] as HTMLElement;
   targetBlock.getBoundingClientRect = () => ({
     top: 200, bottom: 240, left: 100, right: 1100, width: 1000, height: 40,
     x: 100, y: 200, toJSON: () => ({}),
@@ -293,4 +432,19 @@ test('slash heading inside a task converts only that item and undoes in one step
   assert.equal(editor.state.doc.child(1).attrs.level, 2);
   editor.commands.undo();
   assert.deepEqual(editor.getJSON(), original);
+});
+
+test('converting a folded toggle preserves rich title and nested body, and undo restores the fold', () => {
+  const editor = make([{ type: 'toggle', attrs: { collapsed: true }, content: [
+    { type: 'paragraph', content: [{ type: 'text', text: 'title', marks: [{ type: 'bold' }] }] },
+    { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [p('detail')] }] },
+  ] }, p('neighbor')]);
+  assert.equal(convertBlock(editor, 0, 'heading2'), true);
+  assert.deepEqual(editor.getJSON().content?.map(n => n.type), ['heading', 'taskList', 'paragraph']);
+  assert.equal(editor.state.doc.firstChild?.firstChild?.marks[0]?.type.name, 'bold');
+  assert.equal(editor.state.doc.child(1).firstChild?.attrs.checked, true);
+  assert.equal(editor.commands.undo(), true);
+  assert.equal(editor.state.doc.firstChild?.type.name, 'toggle');
+  assert.equal(editor.state.doc.firstChild?.attrs.collapsed, true);
+  editor.state.doc.check();
 });

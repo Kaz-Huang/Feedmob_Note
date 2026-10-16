@@ -10,7 +10,7 @@ import {
   Heading3,
   CheckSquare,
   AlertTriangle,
-  Lightbulb,
+  ChevronRight,
   GitGraph,
   Palette,
   Layout,
@@ -42,6 +42,14 @@ interface SlashCommandMenuProps {
 
 const ITEMS: SlashItem[] = [
   {
+    id: 'toggle', title: '折叠列表', description: '收起细节，让正文保持清晰',
+    keywords: ['toggle', 'fold', 'zhedie', '折叠', '收起'], icon: ChevronRight,
+    action: (editor, range) => {
+      const pos = getBlockPosFromSelection(editor);
+      if (pos !== null) convertBlock(editor, pos, 'toggle', range);
+    },
+  },
+  {
     id: "template",
     title: '今日标准日志模版',
     description: '一键插入「今日产出、阻塞卡点、明日规划」结构化模版',
@@ -54,7 +62,7 @@ const ITEMS: SlashItem[] = [
         {
           type: 'heading',
           attrs: { level: 2 },
-          content: [{ type: 'text', text: '🚀 今日产出与突破' }],
+          content: [{ type: 'text', text: '今日进展' }],
         },
         {
           type: 'taskList',
@@ -74,7 +82,7 @@ const ITEMS: SlashItem[] = [
         {
           type: 'heading',
           attrs: { level: 2 },
-          content: [{ type: 'text', text: '🎯 明日规划' }],
+          content: [{ type: 'text', text: '明日计划' }],
         },
         {
           type: 'taskList',
@@ -290,8 +298,16 @@ const ITEMS: SlashItem[] = [
 ];
 
 export const LOG_TEMPLATE = ITEMS.find(item => item.id === 'template')!;
-const COMMAND_ORDER = ['paragraph', 'h1', 'h2', 'h3', 'taskList', 'bulletList', 'orderedList', 'blockquote', 'codeBlock', 'divider', 'blocker', 'columns', 'mermaid', 'whiteboard', 'embed', 'template'];
-export const SLASH_ITEMS = [...ITEMS].sort((a, b) => COMMAND_ORDER.indexOf(a.id) - COMMAND_ORDER.indexOf(b.id));
+const COMMAND_ORDER = ['paragraph', 'h1', 'h2', 'h3', 'taskList', 'bulletList', 'orderedList', 'toggle', 'blockquote', 'codeBlock', 'divider', 'blocker', 'columns', 'mermaid', 'whiteboard', 'embed', 'template'];
+const LABELS: Record<string, [string, string]> = {
+  paragraph: ['文本', '从一段普通文字开始'], h1: ['标题 1', '用于页面的主要章节'], h2: ['标题 2', '用于章节内的小节'], h3: ['标题 3', '用于更细一级的内容'],
+  taskList: ['待办事项', '跟踪任务，完成后勾选'], bulletList: ['项目列表', '用圆点列出几件事情'], orderedList: ['编号列表', '按顺序记录步骤或要点'],
+  blockquote: ['引用', '突出引用或重要观点'], codeBlock: ['代码', '保留缩进和原始格式'], divider: ['分割线', '为内容划分清晰的段落'],
+  blocker: ['阻塞事项', '标记风险和需要协调的事项'], columns: ['双栏', '将内容并排放置'], mermaid: ['流程图', '用 Mermaid 描述流程与结构'],
+  whiteboard: ['白板', '画一个草图或解释想法'], embed: ['嵌入链接', '添加 Figma、视频或网页'], template: ['日志模板', '今日进展、阻塞事项和明日计划'],
+};
+export const SLASH_ITEMS = [...ITEMS].sort((a, b) => COMMAND_ORDER.indexOf(a.id) - COMMAND_ORDER.indexOf(b.id)).map(item => ({ ...item, title: LABELS[item.id]?.[0] || item.title, description: LABELS[item.id]?.[1] || item.description }));
+const commandGroup = (id: string) => id === 'template' || id === 'blocker' ? '工作日志' : ['columns', 'mermaid', 'whiteboard', 'embed'].includes(id) ? '布局与内容' : '基础块';
 
 export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
   editor,
@@ -373,74 +389,40 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
     }
   }, [isOpen, selectedIndex, filteredItems, editor, range, onClose]);
 
+  useEffect(() => {
+    if (!editor || !isOpen) return;
+    const dom = editor.view.dom;
+    dom.setAttribute('aria-controls', 'slash-command-list');
+    dom.setAttribute('aria-haspopup', 'listbox');
+    const item = filteredItems[selectedIndex];
+    if (item) dom.setAttribute('aria-activedescendant', 'slash-option-' + item.id);
+    else dom.removeAttribute('aria-activedescendant');
+    return () => { dom.removeAttribute('aria-controls'); dom.removeAttribute('aria-haspopup'); dom.removeAttribute('aria-activedescendant'); };
+  }, [editor, isOpen, selectedIndex, cleanQuery]);
+
   if (!isOpen) return null;
 
   return (
-    <div
-      ref={menuRef}
-      role="listbox"
-      aria-label="选择块类型"
-      style={{
-        top: `${menuPosition.y}px`,
-        left: `${menuPosition.x}px`,
-        maxWidth: 'calc(100vw - 16px)',
-        maxHeight: 'min(24rem, calc(100vh - 16px))',
-      }}
-      className="fixed z-50 w-80 max-h-96 overflow-y-auto bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex flex-col gap-1 animate-in fade-in zoom-in-95 duration-75"
-    >
-      <div className="px-3 py-1.5 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider flex items-center justify-between">
-        <span>插入 Block 组件</span>
-        {cleanQuery && <span className="text-emerald-500">过滤: "{cleanQuery}"</span>}
-      </div>
-
-      {filteredItems.length === 0 ? (
-        <div className="py-5 text-center text-sm text-slate-400">
-          未找到匹配的 Block 组件
-        </div>
-      ) : (
-        filteredItems.map((item, index) => {
-          const Icon = item.icon;
-          const isSelected = index === selectedIndex;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="option"
-              aria-selected={isSelected}
-              onMouseDown={(e) => {
-                // Prevent blurring editor before executing
-                e.preventDefault();
-                onClose();
-                if (editor) item.action(editor, range);
-              }}
-              onMouseEnter={() => setSelectedIndex(index)}
-              className={`flex items-start gap-3 px-3 py-2.5 rounded-xl text-left transition ${
-                isSelected
-                  ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200'
-                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
-              }`}
-            >
-              <div
-                className={`p-2 rounded-lg mt-0.5 ${
-                  isSelected
-                    ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                }`}
-              >
-                <Icon className="w-4.5 h-4.5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
-                  {item.title}
-                </div>
-                <div className="text-xs text-slate-400 truncate mt-0.5">
-                  {item.description}
-                </div>
-              </div>
-            </button>
-          );
-        })
-      )}
+    <div ref={menuRef} id="slash-command-list" role="listbox" aria-label="选择块类型"
+      style={{ top: menuPosition.y, left: menuPosition.x }} className="slash-menu popover-panel fixed z-50">
+      {cleanQuery && <div className="slash-group">搜索「{query}」</div>}
+      {filteredItems.length === 0 ? <div className="p-5 text-sm text-[var(--muted-foreground)]">没有匹配的块。试试「标题」或「todo」。</div> : filteredItems.map((item, index) => {
+        const Icon = item.icon;
+        const group = commandGroup(item.id);
+        const showGroup = !cleanQuery && (index === 0 || commandGroup(filteredItems[index - 1].id) !== group);
+        return <React.Fragment key={item.id}>
+          {showGroup && <div className="slash-group" role="presentation">{group}</div>}
+          <button id={'slash-option-' + item.id} type="button" role="option" aria-selected={index === selectedIndex}
+            onMouseDown={event => event.preventDefault()}
+            onClick={() => { onClose(); if (editor) item.action(editor, range); }}
+            onMouseEnter={() => setSelectedIndex(index)}
+            className={`slash-option ${index === selectedIndex ? 'is-selected' : ''}`}>
+            <span className="slash-option-icon"><Icon size={18} strokeWidth={1.6} /></span>
+            <span className="flex-1 min-w-0"><span className="slash-option-title block">{item.title}</span><span className="slash-option-description block">{item.description}</span></span>
+          </button>
+        </React.Fragment>;
+      })}
+      <div className="slash-footer" role="presentation"><kbd>↑↓</kbd>选择<kbd>Enter</kbd>插入<span className="ml-auto"><kbd>Esc</kbd>关闭</span></div>
     </div>
   );
 };

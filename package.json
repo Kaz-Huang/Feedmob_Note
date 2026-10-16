@@ -1,5 +1,5 @@
 {
-  "name": "feedmob-note",
+  "name": "minework",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:push": "prisma db push",
+    "db:push": "node scripts/prepare-db.mjs && prisma db push",
     "db:seed": "node prisma/seed.js",
     "db:studio": "prisma studio",
     "test": "tsx --test tests/*.test.tsx",
@@ -38,7 +38,8 @@
     "lowlight": "^3.3.0",
     "lucide-react": "^0.475.0",
     "mermaid": "^11.4.1",
-    "next": "^15.1.7",
+    "next": "15.5.27",
+    "next-auth": "4.24.15",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwind-merge": "^3.0.1"

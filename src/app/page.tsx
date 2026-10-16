@@ -7,7 +7,6 @@ import { parseDocument } from '@/components/editor/utils/document';
 import { format, addDays } from 'date-fns';
 import { WorkLog } from '@/types';
 import {
-  Calendar,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -17,15 +16,15 @@ const BlockEditor = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex-1 flex items-center justify-center min-h-[500px] text-slate-400 text-sm animate-pulse">
-        正在加载 Notion 编辑器...
+      <div className="flex-1 flex items-center justify-center min-h-[400px] text-[var(--muted-foreground)] text-sm">
+        正在准备编辑器…
       </div>
     ),
   }
 );
 
 export default function TodayFocusPage() {
-  const { currentUser } = useCurrentUser();
+  const { currentUser, loadError: workspaceError, refreshUsers } = useCurrentUser();
   const [selectedDate, setSelectedDate] = useState<string>(() => {
     return format(new Date(), 'yyyy-MM-dd');
   });
@@ -36,6 +35,19 @@ export default function TodayFocusPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const documentId = currentUser ? currentUser.id + ':' + selectedDate : '';
+  useEffect(() => {
+    const readDate = () => {
+      const value = new URLSearchParams(window.location.search).get('date');
+      if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const date = new Date(value + 'T12:00:00');
+        if (!Number.isNaN(date.getTime()) && format(date, 'yyyy-MM-dd') === value) setSelectedDate(value);
+      }
+    };
+    readDate();
+    window.addEventListener('popstate', readDate);
+    return () => window.removeEventListener('popstate', readDate);
+  }, []);
+
   const activeKeyRef = useRef(documentId);
   activeKeyRef.current = documentId;
 
@@ -108,58 +120,23 @@ export default function TodayFocusPage() {
   const isToday = selectedDate === todayStr;
 
   return (
-    <div className="flex-1 flex flex-col w-full min-h-[calc(100vh-4rem)] bg-white dark:bg-slate-950">
-      {/* Top Notion-style Sub-header Bar (Date switcher & Breadcrumb) */}
-      <div className="sticky top-0 z-20 flex items-center justify-between px-6 sm:px-12 lg:px-16 py-3 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-slate-100 dark:border-slate-800/80">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold text-slate-400 dark:text-slate-500">工作日志 /</span>
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-            <button
-              type="button"
-              onClick={() => changeDateBy(-1)}
-              className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
-              title="前一天"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => { if (e.target.value) setSelectedDate(e.target.value); }}
-              className="text-sm font-bold px-2.5 py-0.5 rounded-lg bg-transparent border-0 text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
-            />
-            <button
-              type="button"
-              onClick={() => changeDateBy(1)}
-              className="p-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
-              title="后一天"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-
-          {isToday ? (
-            <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
-              今天
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setSelectedDate(todayStr)}
-              className="px-2.5 py-0.5 rounded-full text-xs font-medium text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            >
-              回到今天
-            </button>
-          )}
+    <div className="flex min-h-[calc(100dvh-3.5rem)] w-full flex-1 flex-col bg-[var(--background)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-8">
+        <div className="flex items-center gap-1 text-sm text-[var(--muted-foreground)]">
+          <button type="button" onClick={() => changeDateBy(-1)} aria-label="前一天" title="前一天" className="flex min-h-10 min-w-9 items-center justify-center rounded transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"><ChevronLeft size={16} /></button>
+          <input aria-label="日志日期" type="date" value={selectedDate} onChange={event => { if (event.target.value) setSelectedDate(event.target.value); }} className="min-h-9 w-[142px] cursor-pointer rounded border border-transparent bg-transparent px-1.5 text-sm text-[var(--foreground)] hover:border-[var(--border)]" />
+          <button type="button" onClick={() => changeDateBy(1)} aria-label="后一天" title="后一天" className="flex min-h-10 min-w-9 items-center justify-center rounded transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"><ChevronRight size={16} /></button>
+          {isToday ? <span className="ml-2 text-xs">今天</span> : <button type="button" onClick={() => setSelectedDate(todayStr)} className="ml-1 min-h-9 rounded px-2 text-xs transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]">回到今天</button>}
         </div>
+        <span className="hidden text-xs text-[var(--muted-foreground)] sm:block">{currentUser?.name ? `${currentUser.name} 的日志` : '工作日志'}</span>
       </div>
-
-      {/* Notion Full-Page Canvas */}
-      <div className="flex-1 w-full flex flex-col">
-        {loadError ? (
-          <div role="alert" className="p-12 text-red-600">{loadError} <button type="button" className="underline" onClick={() => setRetry(value => value + 1)}>重试加载</button></div>
+      <div className="flex w-full flex-1 flex-col">
+        {workspaceError ? (
+          <div role="alert" className="mx-auto w-full max-w-3xl px-6 py-12 text-sm"><p>{workspaceError}</p><button type="button" className="mt-3 rounded border border-[var(--border)] px-3 py-2 hover:bg-[var(--muted)]" onClick={() => void refreshUsers()}>重新加载工作区</button></div>
+        ) : loadError ? (
+          <div role="alert" className="mx-auto w-full max-w-3xl px-6 py-12 text-sm"><p>{loadError}</p><button type="button" className="mt-3 rounded border border-[var(--border)] px-3 py-2 hover:bg-[var(--muted)]" onClick={() => setRetry(value => value + 1)}>重试加载</button></div>
         ) : isLoading || !currentUser || loadedKey !== documentId ? (
-          <div role="status" className="p-12 text-slate-400">正在加载日志…</div>
+          <div role="status" className="mx-auto w-full max-w-3xl px-6 py-12 text-sm text-[var(--muted-foreground)]">正在加载日志…</div>
         ) : <BlockEditor
           documentId={documentId}
           key={`${currentUser?.id}-${selectedDate}`}
@@ -175,5 +152,3 @@ export default function TodayFocusPage() {
     </div>
   );
 }
-
-
