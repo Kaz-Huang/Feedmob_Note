@@ -136,3 +136,35 @@ sudo python3 /home/ubuntu/workweave/cleanup-releases.py --apply
 Google 登录后固定本人身份，只能修改自己的日志、个人资料，并以本人身份评论或签阅。其他成员的日志通过团队动态、日历等入口查看。
 
 管理员可从侧栏或右上角账号菜单进入 `/admin` 管理面板，管理成员资料、角色、所属团队以及团队信息。管理权限由后端校验，管理员也不能冒用他人提交日志。角色变更在后续请求中即时生效；不能移除自己的管理员权限或最后一位公司管理员。
+
+## Minework MCP
+
+账号菜单 → **MCP 连接**（`/settings/mcp`），生成个人密钥并选择权限，有效期 7 / 30 / 90 天，最多 10 个有效密钥。明文只返回一次，数据库只保存 SHA-256 摘要；可随时撤销。
+
+- 地址：`https://minework.techmob.net/mcp`
+- 传输：Streamable HTTP（无状态，JSON 响应；不保留 SSE 会话）
+- 认证：`Authorization: Bearer <个人密钥>`，每次请求校验所属账号、撤销和到期状态。
+- 当前为个人密钥认证，适用于支持认证请求头的 MCP 客户端；尚未实现 OAuth 授权服务器，不适用于只支持浏览器 OAuth 的连接入口。
+- SDK：官方 TypeScript SDK v1 维护分支，协议协商由 SDK 处理。[官方传输文档](https://ts.sdk.modelcontextprotocol.io/index.html)。
+
+| 权限 | 工具 |
+| --- | --- |
+| 所有密钥 | `whoami` |
+| `logs:read` | `get_my_log`, `list_my_logs`, `list_tags` |
+| `logs:write` | `append_my_log`（自动附带本人读取权限） |
+| `team:read` | `team_feed`（与网站团队动态可见范围一致） |
+| `tags:write` | `set_my_log_tags`, `list_tags`（自动附带本人读取权限） |
+
+写入只能操作密钥所属账号。先 `get_my_log(date)` 取得 `revision`，再把它作为写工具的 `expectedRevision`；不存在的日志返回 `missing`。追加工具保留原有文档区块，只增加纯文本段落；遇到版本冲突或超时，先重读核对上次操作是否成功，避免重复追加。标签工具设置完整标签列表，不改动其他成员或全局标签颜色。
+
+MCP 读取的是已提交版本，不含浏览器本地草稿。AI 追加会立即提交；回到网页前请核对旧草稿，避免后续网页提交覆盖 AI 新记录。
+
+Codex 的 `config.toml` 示例（真实密钥通过启动进程环境变量提供，不提交 Git）：
+
+```toml
+[mcp_servers.minework]
+url = "https://minework.techmob.net/mcp"
+bearer_token_env_var = "MINEWORK_MCP_TOKEN"
+```
+
+已有数据库发布时，使用新镜像在当前数据库挂载下执行 `node scripts/migrate-mcp.mjs`。该脚本仅添加 `McpToken` 表及索引，可重复执行，不清空日志或用户。新开发环境也可使用 `npm run db:push`；不要在生产执行 seed。

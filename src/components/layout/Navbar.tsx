@@ -11,7 +11,7 @@ import { MineworkMark } from '@/components/brand/MineworkMark';
 
 interface NavbarProps { onSearch?: (query: string) => void; }
 
-const pageLabels: Record<string, string> = { '/': '工作日志', '/stream': '团队动态', '/calendar': '日志日历', '/tags': '项目标签', '/admin': '管理面板' };
+const pageLabels: Record<string, string> = { '/': '工作日志', '/stream': '团队动态', '/calendar': '日志日历', '/tags': '项目标签', '/admin': '管理面板', '/settings/mcp': 'MCP 连接' };
 
 export const Navbar: React.FC<NavbarProps> = ({ onSearch }) => {
   const pathname = usePathname();
@@ -102,6 +102,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onSearch }) => {
               <p className="break-all">{currentUser?.email}</p>
               <p className="mt-1">{currentUser?.role === 'ADMIN' ? '管理员' : '成员'}</p>
             </div>
+            <Link href="/settings/mcp" onClick={() => setIsUserMenuOpen(false)} className="popover-row mt-2"><span aria-hidden="true">⌘</span>MCP 连接</Link>
             {currentUser?.role === 'ADMIN' && <Link href="/admin" onClick={() => setIsUserMenuOpen(false)} className="popover-row mt-2"><Shield size={15} />管理面板</Link>}
             <div className="mt-3 border-t border-[var(--border)] pt-2"><button type="button" onClick={() => void signOut({ callbackUrl: '/login' })} className="popover-row"><LogOut size={15} />退出登录</button></div>
           </div>}

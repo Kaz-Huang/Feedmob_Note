@@ -19,8 +19,25 @@ model User {
   logs         WorkLog[]
   comments     Comment[]
   reactions    Reaction[]
+  mcpTokens    McpToken[]
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+}
+
+model McpToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  tokenHash  String   @unique
+  prefix     String
+  scopes     String
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  @@index([userId])
 }
 
 model Team {
